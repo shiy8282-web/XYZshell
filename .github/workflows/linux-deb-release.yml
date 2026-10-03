@@ -1,6 +1,12 @@
 name: Linux Debian release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag, for example 0.1.0
+        required: true
+        default: "0.1.0"
   push:
     tags:
       - "v*"
@@ -17,7 +23,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.release_tag || github.event.release.tag_name || github.ref }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -38,6 +44,8 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             tag="${{ github.event.release.tag_name }}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.release_tag }}"
           fi
           if [[ "${tag}" == v* ]]; then
             version="${tag#v}"
