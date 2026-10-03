@@ -109,11 +109,18 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Set up MSYS2 GCC for Fyne
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: mingw-w64-x86_64-gcc
+      - name: Add 64-bit GCC to Windows PATH
+        shell: pwsh
+        run: |
+          $gccDir = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "mingw64\bin"
+          if (-not (Test-Path (Join-Path $gccDir "gcc.exe"))) { throw "MSYS2 64-bit GCC was not found at $gccDir" }
+          Add-Content -Path $env:GITHUB_PATH -Value $gccDir
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -122,6 +129,9 @@ jobs:
       - name: Build Windows GUI and CLI
         shell: pwsh
         run: |
+          $env:CGO_ENABLED = "1"
+          gcc --version
+          go env GOOS GOARCH CGO_ENABLED CC
           New-Item -ItemType Directory -Force dist | Out-Null
           go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
           go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
@@ -145,11 +155,19 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Set up MSYS2 32-bit GCC for Fyne
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW32
+          suppress-deprecation-warnings: msystem-mingw32
           update: true
           install: mingw-w64-i686-gcc
+      - name: Add 32-bit GCC to Windows PATH
+        shell: pwsh
+        run: |
+          $gccDir = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "mingw32\bin"
+          if (-not (Test-Path (Join-Path $gccDir "gcc.exe"))) { throw "MSYS2 32-bit GCC was not found at $gccDir" }
+          Add-Content -Path $env:GITHUB_PATH -Value $gccDir
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -159,7 +177,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
+          $env:CGO_ENABLED = "1"
           $env:GOARCH = "386"
+          gcc --version
+          go env GOOS GOARCH CGO_ENABLED CC
           go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
           go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
           $version = "${{ needs.prepare.outputs.version }}"
