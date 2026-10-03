@@ -136,6 +136,43 @@ jobs:
         shell: pwsh
         run: gh release upload $env:TAG ("dist/XYZshell-windows-x64-v" + $env:VERSION + ".zip") --repo $env:GITHUB_REPOSITORY --clobber
 
+  build-windows-386:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Set up MSYS2 32-bit GCC for Fyne
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: mingw-w64-i686-gcc
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Windows 32-bit GUI and CLI
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $env:GOARCH = "386"
+          go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
+          go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
+          $version = "${{ needs.prepare.outputs.version }}"
+          $archive = "dist/XYZshell-windows-x86-32bit-v$version.zip"
+          Compress-Archive -Path dist/xyzshell-gui.exe, dist/xyzshell-cli.exe -DestinationPath $archive -Force
+      - name: Upload Windows 32-bit package to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: pwsh
+        run: gh release upload $env:TAG ("dist/XYZshell-windows-x86-32bit-v" + $env:VERSION + ".zip") --repo $env:GITHUB_REPOSITORY --clobber
+
   build-macos:
     needs: prepare
     strategy:
