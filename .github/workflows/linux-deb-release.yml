@@ -1,0 +1,89 @@
+name: Linux Debian release
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Fyne Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+
+      - name: Build Debian package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            tag="${{ github.event.release.tag_name }}"
+          fi
+          version="${tag#v}"
+          if [[ -z "${version}" || "${version}" == "${tag}" ]]; then
+            echo "Expected a version tag like v0.1.0, got: ${tag}" >&2
+            exit 1
+          fi
+
+          package_root="dist/package"
+          mkdir -p "${package_root}/DEBIAN" "${package_root}/usr/bin" "${package_root}/usr/share/applications"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "${package_root}/usr/bin/xyzshell-gui" ./cmd/xyzshell-gui
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "${package_root}/usr/bin/xyzshell-cli" ./cmd/xyzshell
+
+          cat > "${package_root}/DEBIAN/control" <<EOF
+          Package: xyzshell
+          Version: ${version}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libc6, libgl1, libx11-6, libxcursor1, libxrandr2, libxinerama1, libxi6, libxxf86vm1, libxkbcommon0, libwayland-client0
+          Maintainer: shiy8282-web
+          Description: Cross-platform SSH client with native GUI and CLI
+           XYZshell provides an SSH desktop client and command-line interface.
+          EOF
+
+          cat > "${package_root}/usr/share/applications/xyzshell.desktop" <<'EOF'
+          [Desktop Entry]
+          Name=XYZshell
+          Comment=SSH client
+          Exec=xyzshell-gui
+          Icon=utilities-terminal
+          Terminal=false
+          Type=Application
+          Categories=Network;RemoteAccess;
+          EOF
+
+          deb="dist/xyzshell_${version}_amd64.deb"
+          dpkg-deb --build --root-owner-group "${package_root}" "${deb}"
+          echo "deb=${deb}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create release or attach package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.package.outputs.tag }}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.package.outputs.tag }}" "${{ steps.package.outputs.deb }}" --repo "${GITHUB_REPOSITORY}" --clobber
+          else
+            gh release create "${{ steps.package.outputs.tag }}" "${{ steps.package.outputs.deb }}" --repo "${GITHUB_REPOSITORY}" --title "XYZshell ${{ steps.package.outputs.tag }}" --generate-notes
+          fi
