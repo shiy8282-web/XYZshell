@@ -1,4 +1,4 @@
-name: Linux Debian release
+name: XYZshell release packages
 
 on:
   workflow_dispatch:
@@ -10,61 +10,68 @@ on:
   push:
     tags:
       - "v*"
-  release:
-    types: [published, edited]
+      - "[0-9]*"
 
 permissions:
   contents: write
 
 jobs:
-  build-deb:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Resolve tag and create release if needed
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_INPUT: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$TAG_INPUT"
+          version="$(printf '%s' "$tag" | sed 's/^v//')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~:-][A-Za-z0-9.+~:-]+)?$ ]]; then
+            echo "Expected a version like 0.1.0 or v0.1.0, got: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "XYZshell $tag" --generate-notes
+          fi
+
+  build-linux:
+    needs: prepare
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.release_tag || github.event.release.tag_name || github.ref }}
-
+          ref: ${{ needs.prepare.outputs.tag }}
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-
       - name: Install Fyne Linux build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
-
       - name: Build Debian package
-        id: package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            tag="${{ github.event.release.tag_name }}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            tag="${{ inputs.release_tag }}"
-          fi
-          if [[ "${tag}" == v* ]]; then
-            version="${tag#v}"
-          else
-            version="${tag}"
-          fi
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~:-][A-Za-z0-9.+~:-]+)?$ ]]; then
-            echo "Expected a version like 0.1.0 or v0.1.0, got: ${tag}" >&2
-            exit 1
-          fi
-
           package_root="dist/package"
-          mkdir -p "${package_root}/DEBIAN" "${package_root}/usr/bin" "${package_root}/usr/share/applications"
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "${package_root}/usr/bin/xyzshell-gui" ./cmd/xyzshell-gui
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "${package_root}/usr/bin/xyzshell-cli" ./cmd/xyzshell
-
-          cat > "${package_root}/DEBIAN/control" <<EOF
+          mkdir -p "$package_root/DEBIAN" "$package_root/usr/bin" "$package_root/usr/share/applications"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$package_root/usr/bin/xyzshell-gui" ./cmd/xyzshell-gui
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$package_root/usr/bin/xyzshell-cli" ./cmd/xyzshell
+          cat > "$package_root/DEBIAN/control" <<EOF
           Package: xyzshell
-          Version: ${version}
+          Version: $VERSION
           Section: net
           Priority: optional
           Architecture: amd64
@@ -73,8 +80,7 @@ jobs:
           Description: Cross-platform SSH client with native GUI and CLI
            XYZshell provides an SSH desktop client and command-line interface.
           EOF
-
-          cat > "${package_root}/usr/share/applications/xyzshell.desktop" <<'EOF'
+          cat > "$package_root/usr/share/applications/xyzshell.desktop" <<'EOF'
           [Desktop Entry]
           Name=XYZshell
           Comment=SSH client
@@ -84,18 +90,112 @@ jobs:
           Type=Application
           Categories=Network;RemoteAccess;
           EOF
-
-          deb="dist/xyzshell_${version}_amd64.deb"
-          dpkg-deb --build --root-owner-group "${package_root}" "${deb}"
-          echo "deb=${deb}" >> "${GITHUB_OUTPUT}"
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
-
-      - name: Create release or attach package
+          deb="dist/xyzshell_"$VERSION"_amd64.deb"
+          dpkg-deb --build --root-owner-group "$package_root" "$deb"
+      - name: Upload Debian package to release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: gh release upload "$TAG" "dist/xyzshell_"$VERSION"_amd64.deb" --repo "$GITHUB_REPOSITORY" --clobber
+
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Set up MSYS2 GCC for Fyne
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Windows GUI and CLI
+        shell: pwsh
         run: |
-          if gh release view "${{ steps.package.outputs.tag }}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${{ steps.package.outputs.tag }}" "${{ steps.package.outputs.deb }}" --repo "${GITHUB_REPOSITORY}" --clobber
-          else
-            gh release create "${{ steps.package.outputs.tag }}" "${{ steps.package.outputs.deb }}" --repo "${GITHUB_REPOSITORY}" --title "XYZshell ${{ steps.package.outputs.tag }}" --generate-notes
-          fi
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
+          go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
+          $version = "${{ needs.prepare.outputs.version }}"
+          $archive = "dist/XYZshell-windows-x64-v$version.zip"
+          Compress-Archive -Path dist/xyzshell-gui.exe, dist/xyzshell-cli.exe -DestinationPath $archive -Force
+      - name: Upload Windows package to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: pwsh
+        run: gh release upload $env:TAG ("dist/XYZshell-windows-x64-v" + $env:VERSION + ".zip") --repo $env:GITHUB_REPOSITORY --clobber
+
+  build-macos:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            goarch: amd64
+            asset_arch: x64
+          - runner: macos-15
+            goarch: arm64
+            asset_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build macOS app and CLI archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="dist/XYZshell-macos-"$ASSET_ARCH
+          app_dir="$package_dir/XYZshell.app/Contents"
+          mkdir -p "$app_dir/MacOS"
+          CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$app_dir/MacOS/XYZshell" ./cmd/xyzshell-gui
+          CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$package_dir/xyzshell-cli" ./cmd/xyzshell
+          chmod +x "$app_dir/MacOS/XYZshell" "$package_dir/xyzshell-cli"
+          cat > "$app_dir/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>XYZshell</string>
+            <key>CFBundleIdentifier</key><string>com.shiy8282.xyzshell</string>
+            <key>CFBundleName</key><string>XYZshell</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          archive="dist/XYZshell-macos-"$ASSET_ARCH"-v"$VERSION".zip"
+          ditto -c -k --sequesterRsrc --keepParent "$package_dir" "$archive"
+      - name: Upload macOS package to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+        shell: bash
+        run: gh release upload "$TAG" "dist/XYZshell-macos-"$ASSET_ARCH"-v"$VERSION".zip" --repo "$GITHUB_REPOSITORY" --clobber
