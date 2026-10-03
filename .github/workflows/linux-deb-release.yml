@@ -100,6 +100,87 @@ jobs:
         shell: bash
         run: gh release upload "$TAG" "dist/xyzshell_"$VERSION"_amd64.deb" --repo "$GITHUB_REPOSITORY" --clobber
 
+  build-linux-arm64:
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Fyne Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+      - name: Build Debian package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_root="dist/package"
+          mkdir -p "$package_root/DEBIAN" "$package_root/usr/bin" "$package_root/usr/share/applications"
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$package_root/usr/bin/xyzshell-gui" ./cmd/xyzshell-gui
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o "$package_root/usr/bin/xyzshell-cli" ./cmd/xyzshell
+          cat > "$package_root/DEBIAN/control" <<EOF
+          Package: xyzshell
+          Version: $VERSION
+          Section: net
+          Priority: optional
+          Architecture: arm64
+          Depends: libc6, libgl1, libx11-6, libxcursor1, libxrandr2, libxinerama1, libxi6, libxxf86vm1, libxkbcommon0, libwayland-client0
+          Maintainer: shiy8282-web
+          Description: Cross-platform SSH client with native GUI and CLI
+           XYZshell provides an SSH desktop client and command-line interface.
+          EOF
+          cat > "$package_root/usr/share/applications/xyzshell.desktop" <<'EOF'
+          [Desktop Entry]
+          Name=XYZshell
+          Comment=SSH client
+          Exec=xyzshell-gui
+          Icon=utilities-terminal
+          Terminal=false
+          Type=Application
+          Categories=Network;RemoteAccess;
+          EOF
+          deb="dist/xyzshell_"$VERSION"_arm64.deb"
+          dpkg-deb --build --root-owner-group "$package_root" "$deb"
+      - name: Build portable Linux ARM64 archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          portable="dist/xyzshell-linux-arm64"
+          mkdir -p "$portable"
+          cp dist/package/usr/bin/xyzshell-gui "$portable/"
+          cp dist/package/usr/bin/xyzshell-cli "$portable/"
+          cat > "$portable/README.txt" <<'EOF'
+          XYZshell Linux ARM64 portable package
+          Run ./xyzshell-gui for the graphical application or ./xyzshell-cli for the command-line client.
+          Linux graphics libraries required by Fyne must be installed on the system.
+          EOF
+          tar -czf "dist/XYZshell-linux-arm64-v$VERSION.tar.gz" -C dist xyzshell-linux-arm64
+      - name: Upload portable Linux ARM64 archive to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: gh release upload "$TAG" "dist/XYZshell-linux-arm64-v$VERSION.tar.gz" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Upload Debian package to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: gh release upload "$TAG" "dist/xyzshell_"$VERSION"_arm64.deb" --repo "$GITHUB_REPOSITORY" --clobber
+
   build-windows:
     needs: prepare
     runs-on: windows-latest
