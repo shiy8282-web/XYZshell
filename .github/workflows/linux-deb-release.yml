@@ -134,7 +134,9 @@ jobs:
           go env GOOS GOARCH CGO_ENABLED CC
           New-Item -ItemType Directory -Force dist | Out-Null
           go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $version = "${{ needs.prepare.outputs.version }}"
           $archive = "dist/XYZshell-windows-x64-v$version.zip"
           Compress-Archive -Path dist/xyzshell-gui.exe, dist/xyzshell-cli.exe -DestinationPath $archive -Force
@@ -182,7 +184,9 @@ jobs:
           gcc --version
           go env GOOS GOARCH CGO_ENABLED CC
           go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $version = "${{ needs.prepare.outputs.version }}"
           $archive = "dist/XYZshell-windows-x86-32bit-v$version.zip"
           Compress-Archive -Path dist/xyzshell-gui.exe, dist/xyzshell-cli.exe -DestinationPath $archive -Force
