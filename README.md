@@ -10,11 +10,17 @@ XYZshell is a cross-platform terminal client with a native Fyne desktop GUI, a C
 
 The GUI connects the embedded terminal directly to the selected session and supports character-by-character input. SSH PTY and Telnet window sizes follow the terminal. Serial connections use the selected port's configured line settings. The CLI accepts one line at a time and sends it when you press Enter.
 
-Passwords are not saved. The terminal client does not currently include SFTP, port forwarding, SSH key/agent authentication, saved profiles, session logging, or multiple tabs.
+## Connection history and session logs
+
+After a successful connection, XYZshell remembers its settings in the user's configuration directory under XYZshell/connections.json. The GUI's recent-connections list can restore these settings. Passwords and other credentials are never saved in connection history.
+
+Session logging is optional and off by default. Turn on “保存终端输入/输出日志” in the GUI or pass -log to the CLI to save raw terminal input and output under the XYZshell/logs folder in the user's configuration directory. Logs can contain commands, typed passwords, and other sensitive terminal data, especially for Telnet and serial sessions. Review the log before sharing it.
+
+The terminal client does not currently include SFTP, port forwarding, SSH key/agent authentication, log browsing and retention controls, or multiple tabs.
 
 ## Requirements
 
-- Go 1.27 or newer.
+- Go 1.27.1 or newer.
 - Windows: GCC from MSYS2 MinGW x64 available on PATH for Fyne's CGO graphics backend.
 - Linux: GCC and the platform graphics development headers for Fyne.
 - Network access to a Go module proxy on the first build.
@@ -33,10 +39,16 @@ Start an SSH CLI session:
 go run ./cmd/xyzshell -protocol ssh -host example.com -user myuser -port 22
 ~~~
 
-Start Telnet:
+Start a Telnet CLI session:
 
 ~~~sh
 go run ./cmd/xyzshell -protocol telnet -host example.com -port 23
+~~~
+
+Add -log to save the CLI session:
+
+~~~sh
+go run ./cmd/xyzshell -protocol ssh -host example.com -user myuser -port 22 -log
 ~~~
 
 Open a serial terminal:
@@ -74,4 +86,4 @@ go env -w GOPROXY=https://goproxy.cn,direct
 
 ## API
 
-pkg/sshclient, pkg/telnetclient, and pkg/serialclient expose the connection implementations. SSH host keys are checked before accepting a new server key.
+pkg/sshclient, pkg/telnetclient, and pkg/serialclient expose the connection implementations. Connection history and session logs are stored in the user's XYZshell configuration directory.

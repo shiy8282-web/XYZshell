@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"github.com/fyne-io/terminal"
 	"xyzshell/pkg/serialclient"
+	"xyzshell/pkg/sessionlog"
 	"xyzshell/pkg/sshclient"
 	"xyzshell/pkg/telnetclient"
 	"xyzshell/pkg/xyzshell"
@@ -53,7 +54,11 @@ func main() {
 	parity.SetSelected("None")
 	stopBits := widget.NewSelect([]string{"1", "2"}, nil)
 	stopBits.SetSelected("1")
+	historySelect := widget.NewSelect(nil, nil)
+	history := []xyzshell.ConnectionProfile{}
 	status := widget.NewLabel("未连接")
+	recordLog := widget.NewCheck("下次连接记录终端输入/输出（可能包含密码）", nil)
+	recordLog.SetChecked(false)
 	termView := terminal.New()
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
@@ -84,6 +89,7 @@ func main() {
 	dataBitsField := container.NewVBox(widget.NewLabel("数据位"), dataBits)
 	parityField := container.NewVBox(widget.NewLabel("校验位"), parity)
 	stopBitsField := container.NewVBox(widget.NewLabel("停止位"), stopBits)
+	historyField := container.NewVBox(widget.NewLabel("最近连接"), historySelect)
 	refreshPorts := widget.NewButton("刷新串口", func() {
 		ports, err := serialclient.ListPorts()
 		if err != nil {
@@ -124,6 +130,51 @@ func main() {
 	protocol.OnChanged = updateFields
 	updateFields(protocol.Selected)
 
+	historySelect.OnChanged = func(label string) {
+		for _, profile := range history {
+			if profile.DisplayName() != label {
+				continue
+			}
+			protocol.SetSelected(profile.Protocol)
+			host.SetText(profile.Host)
+			user.SetText(profile.User)
+			if profile.Port != 0 {
+				port.SetText(strconv.Itoa(int(profile.Port)))
+			}
+			serialPort.SetText(profile.SerialPort)
+			if profile.BaudRate != 0 {
+				baud.SetText(strconv.Itoa(profile.BaudRate))
+			}
+			if profile.DataBits != 0 {
+				dataBits.SetSelected(strconv.Itoa(profile.DataBits))
+			}
+			if profile.Parity != "" {
+				parity.SetSelected(profile.Parity)
+			}
+			if profile.StopBits != 0 {
+				stopBits.SetSelected(strconv.Itoa(profile.StopBits))
+			}
+			password.SetText("")
+			return
+		}
+	}
+	refreshHistory := func(profiles []xyzshell.ConnectionProfile) {
+		history = profiles
+		options := make([]string, 0, len(profiles))
+		for _, profile := range profiles {
+			options = append(options, profile.DisplayName())
+		}
+		historySelect.SetOptions(options)
+		if len(options) == 0 {
+			historySelect.ClearSelected()
+		}
+	}
+	if profiles, err := xyzshell.LoadConnectionHistory(); err != nil {
+		status.SetText("连接历史读取失败: " + err.Error())
+	} else {
+		refreshHistory(profiles)
+	}
+
 	var current terminalSession
 	connecting := false
 	var connectButton, disconnectButton *widget.Button
@@ -135,6 +186,7 @@ func main() {
 		selected := protocol.Selected
 		var cfg xyzshell.Config
 		var serialCfg serialclient.Config
+		var profile xyzshell.ConnectionProfile
 		var target string
 		var networkPort uint16
 		switch selected {
@@ -152,9 +204,13 @@ func main() {
 					dialog.ShowError(err, w)
 					return
 				}
-			} else if target == "" || strings.ContainsAny(target, " \t\r\n/\\") {
-				dialog.ShowError(fmt.Errorf("请输入有效的 Telnet 主机名或 IP 地址"), w)
-				return
+				profile = xyzshell.ConnectionProfile{Protocol: "SSH", Host: cfg.Host, Port: cfg.Port, User: cfg.User}
+			} else {
+				if target == "" || strings.ContainsAny(target, " \t\r\n/\\") {
+					dialog.ShowError(fmt.Errorf("请输入有效的 Telnet 主机名或 IP 地址"), w)
+					return
+				}
+				profile = xyzshell.ConnectionProfile{Protocol: "Telnet", Host: target, Port: networkPort}
 			}
 		case "Serial":
 			target = strings.TrimSpace(serialPort.Text)
@@ -173,6 +229,10 @@ func main() {
 				Port: target, BaudRate: rate, DataBits: bits,
 				Parity: parity.Selected, StopBits: stops,
 			}
+			profile = xyzshell.ConnectionProfile{
+				Protocol: "Serial", SerialPort: target, BaudRate: rate,
+				DataBits: bits, Parity: parity.Selected, StopBits: stops,
+			}
 		default:
 			dialog.ShowError(fmt.Errorf("请选择连接方式"), w)
 			return
@@ -180,6 +240,7 @@ func main() {
 
 		secret := password.Text
 		password.SetText("")
+		saveLog := recordLog.Checked
 		connecting = true
 		connectButton.Disable()
 		status.SetText("正在连接…")
@@ -215,6 +276,17 @@ func main() {
 					dialog.ShowError(err, w)
 					return
 				}
+				var recorder *sessionlog.Recorder
+				if saveLog {
+					recorder, err = sessionlog.New(profile)
+					if err != nil {
+						_ = s.Close()
+						connectButton.Enable()
+						status.SetText("日志文件创建失败")
+						dialog.ShowError(err, w)
+						return
+					}
+				}
 				current = s
 				connectButton.Disable()
 				disconnectButton.Enable()
@@ -226,19 +298,35 @@ func main() {
 				default:
 					status.SetText("已连接到 " + cfg.Address())
 				}
+				if profiles, historyErr := xyzshell.RememberConnection(profile); historyErr != nil {
+					dialog.ShowError(fmt.Errorf("连接已成功，但无法保存历史记录：%w", historyErr), w)
+				} else {
+					refreshHistory(profiles)
+				}
 				resizeMu.Lock()
 				resizeSession = s
 				initialSize := lastSize
 				resizeMu.Unlock()
 				_ = s.Resize(initialSize.Rows, initialSize.Columns)
+
+				input := s.Input()
+				output := s.Output()
+				if recorder != nil {
+					input = recorder.WrapInput(input)
+					output = recorder.WrapOutput(output)
+					status.SetText(status.Text + "；日志：" + recorder.Path())
+				}
 				go func() {
-					_ = termView.RunWithConnection(s.Input(), s.Output())
+					_ = termView.RunWithConnection(input, output)
 					resizeMu.Lock()
 					if resizeSession == s {
 						resizeSession = nil
 					}
 					resizeMu.Unlock()
 					_ = s.Close()
+					if recorder != nil {
+						_ = recorder.Close()
+					}
 					fyne.Do(func() {
 						if current == s {
 							current = nil
@@ -281,7 +369,10 @@ func main() {
 		dialog.ShowInformation("SSH 算法能力", body, w)
 	})
 
-	top := container.NewGridWithColumns(4, protocolField, hostField, userField, portField, passwordField, serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
+	fields := container.NewGridWithColumns(4,
+		protocolField, historyField, hostField, userField, portField, passwordField,
+		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
+	top := container.NewVBox(fields, recordLog)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(algorithms, connectButton, disconnectButton), status)
 	w.SetContent(container.NewBorder(container.NewVBox(header, top), nil, nil, nil, termView))
