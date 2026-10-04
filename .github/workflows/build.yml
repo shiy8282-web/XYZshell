@@ -1,0 +1,170 @@
+name: XYZshell build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows ${{ matrix.asset_arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - msystem: MINGW64
+            gcc: mingw-w64-x86_64-gcc
+            gcc_dir: mingw64
+            goarch: amd64
+            asset_arch: x64
+          - msystem: MINGW32
+            gcc: mingw-w64-i686-gcc
+            gcc_dir: mingw32
+            goarch: '386'
+            asset_arch: x86-32bit
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+      - name: Set up MSYS2 GCC for Fyne
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: ${{ matrix.gcc }}
+      - name: Add GCC to PATH
+        shell: pwsh
+        run: |
+          $gccDir = Join-Path "${{ steps.msys2.outputs.msys2-location }}" "${{ matrix.gcc_dir }}\bin"
+          if (-not (Test-Path (Join-Path $gccDir "gcc.exe"))) { throw "GCC was not found at $gccDir" }
+          Add-Content -Path $env:GITHUB_PATH -Value $gccDir
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build Windows GUI and CLI
+        shell: pwsh
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $env:CGO_ENABLED = "1"
+          gcc --version
+          go build -trimpath -ldflags="-H=windowsgui -s -w" -o dist/xyzshell-gui.exe ./cmd/xyzshell-gui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -trimpath -ldflags="-s -w" -o dist/xyzshell-cli.exe ./cmd/xyzshell
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path dist/xyzshell-gui.exe, dist/xyzshell-cli.exe -DestinationPath "dist/XYZshell-windows-${{ matrix.asset_arch }}.zip" -Force
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: XYZshell-windows-${{ matrix.asset_arch }}
+          path: dist/XYZshell-windows-${{ matrix.asset_arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  build-linux:
+    name: Linux ${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goarch: arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Fyne Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev
+      - name: Build Linux GUI and CLI
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          package="dist/XYZshell-linux-${GOARCH}"
+          mkdir -p "$package"
+          CGO_ENABLED=1 GOOS=linux GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$package/xyzshell-gui" ./cmd/xyzshell-gui
+          CGO_ENABLED=1 GOOS=linux GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$package/xyzshell-cli" ./cmd/xyzshell
+          tar -czf "dist/XYZshell-linux-${GOARCH}.tar.gz" -C dist "XYZshell-linux-${GOARCH}"
+      - name: Upload Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: XYZshell-linux-${{ matrix.goarch }}
+          path: dist/XYZshell-linux-${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  build-macos:
+    name: macOS ${{ matrix.asset_arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            goarch: amd64
+            asset_arch: x64
+          - runner: macos-15
+            goarch: arm64
+            asset_arch: arm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build macOS app and CLI
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="dist/XYZshell-macos-$ASSET_ARCH"
+          app_dir="$package_dir/XYZshell.app/Contents"
+          mkdir -p "$app_dir/MacOS"
+          CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$app_dir/MacOS/XYZshell" ./cmd/xyzshell-gui
+          CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$package_dir/xyzshell-cli" ./cmd/xyzshell
+          chmod +x "$app_dir/MacOS/XYZshell" "$package_dir/xyzshell-cli"
+          cat > "$app_dir/Info.plist" <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>XYZshell</string>
+            <key>CFBundleIdentifier</key><string>com.shiy8282.xyzshell</string>
+            <key>CFBundleName</key><string>XYZshell</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.1.0</string>
+            <key>CFBundleVersion</key><string>0.1.0</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          ditto -c -k --sequesterRsrc --keepParent "$package_dir" "dist/XYZshell-macos-$ASSET_ARCH.zip"
+      - name: Upload macOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: XYZshell-macos-${{ matrix.asset_arch }}
+          path: dist/XYZshell-macos-${{ matrix.asset_arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
