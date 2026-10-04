@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,15 +15,26 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 	"github.com/fyne-io/terminal"
+	"xyzshell/pkg/serialclient"
 	"xyzshell/pkg/sshclient"
+	"xyzshell/pkg/telnetclient"
 	"xyzshell/pkg/xyzshell"
 )
+
+type terminalSession interface {
+	Input() io.WriteCloser
+	Output() io.Reader
+	Resize(rows, columns uint) error
+	Close() error
+}
 
 func main() {
 	a := app.NewWithID("io.xyzshell.desktop")
 	w := a.NewWindow("XYZshell")
 	w.Resize(fyne.NewSize(1120, 760))
 
+	protocol := widget.NewSelect([]string{"SSH", "Telnet", "Serial"}, nil)
+	protocol.SetSelected("SSH")
 	host := widget.NewEntry()
 	host.SetPlaceHolder("example.com")
 	user := widget.NewEntry()
@@ -31,27 +43,88 @@ func main() {
 	port.SetText("22")
 	password := widget.NewPasswordEntry()
 	password.SetPlaceHolder("密码仅用于本次连接")
+	serialPort := widget.NewSelectEntry(nil)
+	serialPort.SetPlaceHolder("COM3 或 /dev/ttyUSB0")
+	baud := widget.NewEntry()
+	baud.SetText("9600")
+	dataBits := widget.NewSelect([]string{"5", "6", "7", "8"}, nil)
+	dataBits.SetSelected("8")
+	parity := widget.NewSelect([]string{"None", "Even", "Odd"}, nil)
+	parity.SetSelected("None")
+	stopBits := widget.NewSelect([]string{"1", "2"}, nil)
+	stopBits.SetSelected("1")
 	status := widget.NewLabel("未连接")
 	termView := terminal.New()
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
+
 	var resizeMu sync.Mutex
 	var lastSize terminal.Config
-	var resizeClient *sshclient.Client
+	var resizeSession terminalSession
 	go func() {
 		for size := range resizeEvents {
 			resizeMu.Lock()
 			lastSize = size
-			client := resizeClient
+			s := resizeSession
 			resizeMu.Unlock()
-			if client != nil {
-				if err := client.Resize(size.Rows, size.Columns); err != nil {
+			if s != nil {
+				if err := s.Resize(size.Rows, size.Columns); err != nil {
 					fyne.Do(func() { status.SetText("终端尺寸同步失败: " + err.Error()) })
 				}
 			}
 		}
 	}()
-	var current *sshclient.Client
+
+	hostField := container.NewVBox(widget.NewLabel("主机"), host)
+	userField := container.NewVBox(widget.NewLabel("用户名"), user)
+	portField := container.NewVBox(widget.NewLabel("端口"), port)
+	passwordField := container.NewVBox(widget.NewLabel("密码"), password)
+	serialField := container.NewVBox(widget.NewLabel("串口"), serialPort)
+	baudField := container.NewVBox(widget.NewLabel("波特率"), baud)
+	dataBitsField := container.NewVBox(widget.NewLabel("数据位"), dataBits)
+	parityField := container.NewVBox(widget.NewLabel("校验位"), parity)
+	stopBitsField := container.NewVBox(widget.NewLabel("停止位"), stopBits)
+	refreshPorts := widget.NewButton("刷新串口", func() {
+		ports, err := serialclient.ListPorts()
+		if err != nil {
+			dialog.ShowError(err, w)
+			return
+		}
+		serialPort.SetOptions(ports)
+		if len(ports) > 0 && serialPort.Text == "" {
+			serialPort.SetText(ports[0])
+		}
+	})
+	protocolField := container.NewVBox(widget.NewLabel("连接方式"), protocol)
+	setVisible := func(obj fyne.CanvasObject, visible bool) {
+		if visible {
+			obj.Show()
+		} else {
+			obj.Hide()
+		}
+	}
+	updateFields := func(value string) {
+		isSerial, isSSH := value == "Serial", value == "SSH"
+		setVisible(hostField, !isSerial)
+		setVisible(portField, !isSerial)
+		setVisible(userField, isSSH)
+		setVisible(passwordField, isSSH)
+		setVisible(serialField, isSerial)
+		setVisible(refreshPorts, isSerial)
+		setVisible(baudField, isSerial)
+		setVisible(dataBitsField, isSerial)
+		setVisible(parityField, isSerial)
+		setVisible(stopBitsField, isSerial)
+		if value == "Telnet" && port.Text == "22" {
+			port.SetText("23")
+		} else if value == "SSH" && port.Text == "23" {
+			port.SetText("22")
+		}
+	}
+	protocol.OnChanged = updateFields
+	updateFields(protocol.Selected)
+
+	var current terminalSession
 	connecting := false
 	var connectButton, disconnectButton *widget.Button
 
@@ -59,14 +132,49 @@ func main() {
 		if connecting || current != nil {
 			return
 		}
-		portValue, err := strconv.ParseUint(strings.TrimSpace(port.Text), 10, 16)
-		if err != nil || portValue == 0 {
-			dialog.ShowError(fmt.Errorf("端口必须是 1 到 65535 之间的数字"), w)
-			return
-		}
-		cfg := xyzshell.Config{Host: strings.TrimSpace(host.Text), User: strings.TrimSpace(user.Text), Port: uint16(portValue)}
-		if err := cfg.Validate(); err != nil {
-			dialog.ShowError(err, w)
+		selected := protocol.Selected
+		var cfg xyzshell.Config
+		var serialCfg serialclient.Config
+		var target string
+		var networkPort uint16
+		switch selected {
+		case "SSH", "Telnet":
+			portValue, err := strconv.ParseUint(strings.TrimSpace(port.Text), 10, 16)
+			if err != nil || portValue == 0 {
+				dialog.ShowError(fmt.Errorf("端口必须是 1 到 65535 之间的数字"), w)
+				return
+			}
+			networkPort = uint16(portValue)
+			target = strings.TrimSpace(host.Text)
+			if selected == "SSH" {
+				cfg = xyzshell.Config{Host: target, User: strings.TrimSpace(user.Text), Port: networkPort}
+				if err := cfg.Validate(); err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+			} else if target == "" || strings.ContainsAny(target, " \t\r\n/\\") {
+				dialog.ShowError(fmt.Errorf("请输入有效的 Telnet 主机名或 IP 地址"), w)
+				return
+			}
+		case "Serial":
+			target = strings.TrimSpace(serialPort.Text)
+			if target == "" {
+				dialog.ShowError(fmt.Errorf("请选择或输入串口名称"), w)
+				return
+			}
+			rate, err := strconv.Atoi(strings.TrimSpace(baud.Text))
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("波特率必须是数字"), w)
+				return
+			}
+			bits, _ := strconv.Atoi(dataBits.Selected)
+			stops, _ := strconv.Atoi(stopBits.Selected)
+			serialCfg = serialclient.Config{
+				Port: target, BaudRate: rate, DataBits: bits,
+				Parity: parity.Selected, StopBits: stops,
+			}
+		default:
+			dialog.ShowError(fmt.Errorf("请选择连接方式"), w)
 			return
 		}
 
@@ -76,20 +184,29 @@ func main() {
 		connectButton.Disable()
 		status.SetText("正在连接…")
 		go func() {
-			client, err := sshclient.Connect(context.Background(), cfg, secret, func(host, fingerprint string) bool {
-				decision := make(chan bool, 1)
-				fyne.Do(func() {
-					dialog.ShowConfirm("验证 SSH 主机密钥",
-						fmt.Sprintf("服务器：%s\nSHA256 指纹：\n%s\n\n仅当你确认这是目标服务器时才接受。", host, fingerprint),
-						func(ok bool) { decision <- ok }, w)
+			var s terminalSession
+			var err error
+			switch selected {
+			case "SSH":
+				s, err = sshclient.Connect(context.Background(), cfg, secret, func(host, fingerprint string) bool {
+					decision := make(chan bool, 1)
+					fyne.Do(func() {
+						dialog.ShowConfirm("验证 SSH 主机密钥",
+							fmt.Sprintf("服务器：%s\nSHA256 指纹：\n%s\n\n仅当你确认这是目标服务器时才接受。", host, fingerprint),
+							func(ok bool) { decision <- ok }, w)
+					})
+					select {
+					case ok := <-decision:
+						return ok
+					case <-time.After(2 * time.Minute):
+						return false
+					}
 				})
-				select {
-				case ok := <-decision:
-					return ok
-				case <-time.After(2 * time.Minute):
-					return false
-				}
-			})
+			case "Telnet":
+				s, err = telnetclient.Connect(target, networkPort)
+			case "Serial":
+				s, err = serialclient.Connect(serialCfg)
+			}
 			fyne.Do(func() {
 				connecting = false
 				if err != nil {
@@ -98,26 +215,32 @@ func main() {
 					dialog.ShowError(err, w)
 					return
 				}
-				current = client
+				current = s
 				connectButton.Disable()
 				disconnectButton.Enable()
-				status.SetText("已连接到 " + cfg.Address())
-
+				switch selected {
+				case "Serial":
+					status.SetText("已连接串口 " + target)
+				case "Telnet":
+					status.SetText(fmt.Sprintf("已连接到 %s:%d（明文）", target, networkPort))
+				default:
+					status.SetText("已连接到 " + cfg.Address())
+				}
 				resizeMu.Lock()
-				resizeClient = client
+				resizeSession = s
 				initialSize := lastSize
 				resizeMu.Unlock()
-				_ = client.Resize(initialSize.Rows, initialSize.Columns)
+				_ = s.Resize(initialSize.Rows, initialSize.Columns)
 				go func() {
-					_ = termView.RunWithConnection(client.Input(), client.Output())
+					_ = termView.RunWithConnection(s.Input(), s.Output())
 					resizeMu.Lock()
-					if resizeClient == client {
-						resizeClient = nil
+					if resizeSession == s {
+						resizeSession = nil
 					}
 					resizeMu.Unlock()
-					_ = client.Close()
+					_ = s.Close()
 					fyne.Do(func() {
-						if current == client {
+						if current == s {
 							current = nil
 							connectButton.Enable()
 							disconnectButton.Disable()
@@ -132,24 +255,24 @@ func main() {
 		if current == nil {
 			return
 		}
-		client := current
+		s := current
 		current = nil
 		resizeMu.Lock()
-		if resizeClient == client {
-			resizeClient = nil
+		if resizeSession == s {
+			resizeSession = nil
 		}
 		resizeMu.Unlock()
 		disconnectButton.Disable()
 		connectButton.Enable()
 		status.SetText("正在断开…")
 		go func() {
-			_ = client.Close()
+			_ = s.Close()
 			fyne.Do(func() { status.SetText("已断开") })
 		}()
 	})
 	disconnectButton.Disable()
 
-	algorithms := widget.NewButton("加密算法", func() {
+	algorithms := widget.NewButton("SSH 加密算法", func() {
 		alg := xyzshell.Algorithms()
 		legacy := xyzshell.InsecureAlgorithms()
 		body := fmt.Sprintf("当前安全默认值（按优先顺序）\n\n密钥交换\n%s\n\n主机密钥\n%s\n\n加密\n%s\n\nMAC\n%s\n\n已实现但默认排除的旧算法\n%s\n%s\n%s\n%s",
@@ -157,14 +280,11 @@ func main() {
 			strings.Join(legacy.KeyExchanges, "\n"), strings.Join(legacy.HostKeys, "\n"), strings.Join(legacy.Ciphers, "\n"), strings.Join(legacy.MACs, "\n"))
 		dialog.ShowInformation("SSH 算法能力", body, w)
 	})
-	field := func(label string, item fyne.CanvasObject) fyne.CanvasObject {
-		return container.NewVBox(widget.NewLabel(label), item)
-	}
-	form := container.NewGridWithColumns(4,
-		field("主机", host), field("用户名", user), field("端口", port), field("密码", password))
+
+	top := container.NewGridWithColumns(4, protocolField, hostField, userField, portField, passwordField, serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(algorithms, connectButton, disconnectButton), status)
-	w.SetContent(container.NewBorder(container.NewVBox(header, form), nil, nil, nil, termView))
+	w.SetContent(container.NewBorder(container.NewVBox(header, top), nil, nil, nil, termView))
 	w.SetOnClosed(func() {
 		termView.RemoveListener(resizeEvents)
 		if current != nil {

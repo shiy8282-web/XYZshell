@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	fyne.io/fyne/v2 v2.8.1
 	github.com/fyne-io/terminal v0.0.0-20260927151117-c8f30fa130e3
+	go.bug.st/serial v1.8.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/term v0.46.0
 )
