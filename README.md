@@ -8,7 +8,7 @@ XYZshell is a cross-platform terminal client with a native Fyne desktop GUI, a C
 - **Telnet**: TCP terminal connection with Telnet option negotiation, terminal type, and window-size reporting. Telnet sends data without encryption; use it only on trusted networks.
 - **Serial**: choose or enter a port such as COM3, /dev/ttyUSB0, or /dev/ttyACM0; configure baud rate, data bits, parity, and stop bits.
 
-The GUI connects the embedded terminal directly to the selected session and supports character-by-character input. SSH PTY and Telnet window sizes follow the terminal. Serial connections use the selected port's configured line settings.
+The GUI connects the embedded terminal directly to the selected session and supports character-by-character input. SSH PTY and Telnet window sizes follow the terminal. Serial connections use the selected port's configured line settings. The CLI accepts one line at a time and sends it when you press Enter.
 
 Passwords are not saved. The terminal client does not currently include SFTP, port forwarding, SSH key/agent authentication, saved profiles, session logging, or multiple tabs.
 

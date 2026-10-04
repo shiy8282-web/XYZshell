@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -90,31 +91,22 @@ func main() {
 	}
 	defer s.Close()
 
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		fatal("set terminal raw mode", err)
+	readDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(os.Stdout, s.Output())
+		close(readDone)
+	}()
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		if _, err := io.WriteString(s.Input(), scanner.Text()+"\r"); err != nil {
+			fatal("send input", err)
+		}
 	}
-	defer term.Restore(fd, oldState)
-
-	readDone := make(chan error, 1)
-	go func() {
-		_, copyErr := io.Copy(os.Stdout, s.Output())
-		readDone <- copyErr
-	}()
-	inputDone := make(chan error, 1)
-	go func() {
-		_, copyErr := io.Copy(s.Input(), os.Stdin)
-		inputDone <- copyErr
-	}()
-	select {
-	case err = <-readDone:
-	case err = <-inputDone:
+	if err := scanner.Err(); err != nil {
+		fatal("read input", err)
 	}
 	_ = s.Close()
-	if err != nil && err != io.EOF {
-		fatal("terminal session", err)
-	}
+	<-readDone
 }
 
 func fatal(action string, err error) {
