@@ -25,12 +25,13 @@ var trustStoreMu sync.Mutex
 
 // Client represents one authenticated remote terminal session.
 type Client struct {
-	client  *ssh.Client
-	session *ssh.Session
-	stdin   io.WriteCloser
-	stdout  io.Reader
-	outPipe *io.PipeReader
-	close   sync.Once
+	client     *ssh.Client
+	session    *ssh.Session
+	stdin      io.WriteCloser
+	stdout     io.Reader
+	outPipe    *io.PipeReader
+	algorithms ssh.NegotiatedAlgorithms
+	close      sync.Once
 }
 
 // TrustPrompt is called only when the server key is not yet in known_hosts.
@@ -41,9 +42,6 @@ type TrustPrompt func(host, fingerprint string) bool
 func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask TrustPrompt) (*Client, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
-	}
-	if password == "" {
-		return nil, errors.New("password is required")
 	}
 	knownHosts, err := knownHostsPath()
 	if err != nil {
@@ -82,9 +80,16 @@ func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask Trus
 	}
 	rawConn = conn
 	_ = conn.SetDeadline(time.Now().Add(connectTimeout))
+	authMethods := make([]ssh.AuthMethod, 0, 2)
+	if password != "" {
+		authMethods = append(authMethods, ssh.Password(password))
+	}
+	if signers := defaultKeySigners(); len(signers) > 0 {
+		authMethods = append(authMethods, ssh.PublicKeys(signers...))
+	}
 	clientConfig := &ssh.ClientConfig{
 		User:            cfg.User,
-		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		Auth:            authMethods,
 		HostKeyCallback: callback,
 		Timeout:         connectTimeout,
 	}
@@ -92,6 +97,10 @@ func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask Trus
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("SSH handshake or authentication failed: %w", err)
+	}
+	var negotiated ssh.NegotiatedAlgorithms
+	if metadata, ok := clientConn.(ssh.AlgorithmsConnMetadata); ok {
+		negotiated = metadata.Algorithms()
 	}
 	_ = conn.SetDeadline(time.Time{})
 	client := ssh.NewClient(clientConn, channels, requests)
@@ -141,10 +150,16 @@ func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask Trus
 	}
 	go copyStream(stdout)
 	go copyStream(stderr)
-	return &Client{client: client, session: session, stdin: stdin, stdout: merged, outPipe: merged}, nil
+	return &Client{client: client, session: session, stdin: stdin, stdout: merged, outPipe: merged, algorithms: negotiated}, nil
 }
 
 func (c *Client) Output() io.Reader { return c.stdout }
+
+// EncryptionSummary reports the algorithms actually selected for this SSH connection.
+func (c *Client) EncryptionSummary() string {
+	return fmt.Sprintf("KEX %s | 主机密钥 %s | 加密 %s | MAC %s",
+		c.algorithms.KeyExchange, c.algorithms.HostKey, c.algorithms.Read.Cipher, c.algorithms.Read.MAC)
+}
 
 // Input returns the raw terminal input stream for a terminal emulator widget.
 func (c *Client) Input() io.WriteCloser { return c.stdin }
@@ -217,3 +232,23 @@ func appendKnownHost(path, host string, key ssh.PublicKey) error {
 	}
 	return closeErr
 }
+
+func defaultKeySigners() []ssh.Signer {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	var signers []ssh.Signer
+	for _, name := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
+		data, err := os.ReadFile(filepath.Join(home, ".ssh", name))
+		if err != nil {
+			continue
+		}
+		signer, err := ssh.ParsePrivateKey(data)
+		if err == nil {
+			signers = append(signers, signer)
+		}
+	}
+	return signers
+}
+

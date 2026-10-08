@@ -27,10 +27,11 @@ func (c Config) Validate() error {
 		return errors.New("port must be between 1 and 65535")
 	}
 	if strings.TrimSpace(c.User) == "" {
-		return errors.New("username is required")
+		return errors.New("username is required for SSH; enter it when prompted")
 	}
 	if net.ParseIP(strings.Trim(c.Host, "[]")) == nil && strings.ContainsAny(c.Host, "/\\") {
 		return fmt.Errorf("invalid host %q", c.Host)
 	}
 	return nil
 }
+

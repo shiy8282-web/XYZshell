@@ -39,11 +39,11 @@ func main() {
 	host := widget.NewEntry()
 	host.SetPlaceHolder("example.com")
 	user := widget.NewEntry()
-	user.SetPlaceHolder("用户名")
+	user.SetPlaceHolder("用户名（可留空）")
 	port := widget.NewEntry()
 	port.SetText("22")
 	password := widget.NewPasswordEntry()
-	password.SetPlaceHolder("密码仅用于本次连接")
+	password.SetPlaceHolder("密码（可留空）")
 	serialPort := widget.NewSelectEntry(nil)
 	serialPort.SetPlaceHolder("COM3 或 /dev/ttyUSB0")
 	baud := widget.NewEntry()
@@ -57,9 +57,20 @@ func main() {
 	historySelect := widget.NewSelect(nil, nil)
 	history := []xyzshell.ConnectionProfile{}
 	status := widget.NewLabel("未连接")
+	cipherStatus := widget.NewLabel("加密方式：未连接")
 	recordLog := widget.NewCheck("下次连接记录终端输入/输出（可能包含密码）", nil)
 	recordLog.SetChecked(false)
 	termView := terminal.New()
+	historyText := widget.NewLabel("")
+	historyText.TextStyle = fyne.TextStyle{Monospace: true}
+	historyText.Wrapping = fyne.TextWrapBreak
+	historyText.Selectable = true
+	historyScroll := container.NewScroll(historyText)
+	historyScroll.Direction = fyne.ScrollVerticalOnly
+	terminalTabs := container.NewAppTabs(
+		container.NewTabItem("终端", termView),
+		container.NewTabItem("历史输出", historyScroll),
+	)
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
 
@@ -81,9 +92,7 @@ func main() {
 	}()
 
 	hostField := container.NewVBox(widget.NewLabel("主机"), host)
-	userField := container.NewVBox(widget.NewLabel("用户名"), user)
 	portField := container.NewVBox(widget.NewLabel("端口"), port)
-	passwordField := container.NewVBox(widget.NewLabel("密码"), password)
 	serialField := container.NewVBox(widget.NewLabel("串口"), serialPort)
 	baudField := container.NewVBox(widget.NewLabel("波特率"), baud)
 	dataBitsField := container.NewVBox(widget.NewLabel("数据位"), dataBits)
@@ -110,11 +119,12 @@ func main() {
 		}
 	}
 	updateFields := func(value string) {
-		isSerial, isSSH := value == "Serial", value == "SSH"
+		isSerial := value == "Serial"
+		isSSH := value == "SSH"
 		setVisible(hostField, !isSerial)
 		setVisible(portField, !isSerial)
-		setVisible(userField, isSSH)
-		setVisible(passwordField, isSSH)
+		setVisible(user, isSSH)
+		setVisible(password, isSSH)
 		setVisible(serialField, isSerial)
 		setVisible(refreshPorts, isSerial)
 		setVisible(baudField, isSerial)
@@ -184,6 +194,16 @@ func main() {
 			return
 		}
 		selected := protocol.Selected
+		if selected == "SSH" && strings.TrimSpace(user.Text) == "" {
+			dialog.ShowEntryDialog("SSH 用户名", "SSH 需要先确定登录用户名；留空后会在这里询问。", func(value string) {
+				if strings.TrimSpace(value) == "" {
+					return
+				}
+				user.SetText(strings.TrimSpace(value))
+				connectButton.OnTapped()
+			}, w)
+			return
+		}
 		var cfg xyzshell.Config
 		var serialCfg serialclient.Config
 		var profile xyzshell.ConnectionProfile
@@ -240,6 +260,7 @@ func main() {
 
 		secret := password.Text
 		password.SetText("")
+		historyText.SetText("")
 		saveLog := recordLog.Checked
 		connecting = true
 		connectButton.Disable()
@@ -273,6 +294,18 @@ func main() {
 				if err != nil {
 					connectButton.Enable()
 					status.SetText("连接失败")
+					if selected == "SSH" && secret == "" && strings.Contains(strings.ToLower(err.Error()), "authentication") {
+						passwordPrompt := widget.NewPasswordEntry()
+						passwordPrompt.SetPlaceHolder("SSH 密码")
+						dialog.ShowForm("SSH 密码", "未能使用 SSH 密钥登录，请输入密码，或取消后检查设备的认证方式。", "重试", "取消",
+							[]*widget.FormItem{widget.NewFormItem("密码", passwordPrompt)}, func(ok bool) {
+								if ok {
+									password.SetText(passwordPrompt.Text)
+									connectButton.OnTapped()
+								}
+							}, w)
+						return
+					}
 					dialog.ShowError(err, w)
 					return
 				}
@@ -293,10 +326,17 @@ func main() {
 				switch selected {
 				case "Serial":
 					status.SetText("已连接串口 " + target)
+					cipherStatus.SetText("加密方式：串口连接（不使用网络加密算法）")
 				case "Telnet":
 					status.SetText(fmt.Sprintf("已连接到 %s:%d（明文）", target, networkPort))
+					cipherStatus.SetText("加密方式：无（Telnet 明文连接）")
 				default:
 					status.SetText("已连接到 " + cfg.Address())
+					if details, ok := s.(interface{ EncryptionSummary() string }); ok {
+						cipherStatus.SetText("加密方式：" + details.EncryptionSummary())
+					} else {
+						cipherStatus.SetText("加密方式：SSH（协商信息不可用）")
+					}
 				}
 				if profiles, historyErr := xyzshell.RememberConnection(profile); historyErr != nil {
 					dialog.ShowError(fmt.Errorf("连接已成功，但无法保存历史记录：%w", historyErr), w)
@@ -310,7 +350,9 @@ func main() {
 				_ = s.Resize(initialSize.Rows, initialSize.Columns)
 
 				input := s.Input()
-				output := s.Output()
+				output := io.Reader(newScrollbackReader(s.Output(), func(text string) {
+					fyne.Do(func() { historyText.SetText(text) })
+				}))
 				if recorder != nil {
 					input = recorder.WrapInput(input)
 					output = recorder.WrapOutput(output)
@@ -333,6 +375,7 @@ func main() {
 							connectButton.Enable()
 							disconnectButton.Disable()
 							status.SetText("连接已关闭")
+							cipherStatus.SetText("加密方式：未连接")
 						}
 					})
 				}()
@@ -355,7 +398,10 @@ func main() {
 		status.SetText("正在断开…")
 		go func() {
 			_ = s.Close()
-			fyne.Do(func() { status.SetText("已断开") })
+			fyne.Do(func() {
+				status.SetText("已断开")
+				cipherStatus.SetText("加密方式：未连接")
+			})
 		}()
 	})
 	disconnectButton.Disable()
@@ -369,13 +415,13 @@ func main() {
 		dialog.ShowInformation("SSH 算法能力", body, w)
 	})
 
-	fields := container.NewGridWithColumns(4,
-		protocolField, historyField, hostField, userField, portField, passwordField,
+	fields := container.NewGridWithColumns(6,
+		protocolField, historyField, hostField, portField, user, password,
 		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
 	top := container.NewVBox(fields, recordLog)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(algorithms, connectButton, disconnectButton), status)
-	w.SetContent(container.NewBorder(container.NewVBox(header, top), nil, nil, nil, termView))
+	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, terminalTabs))
 	w.SetOnClosed(func() {
 		termView.RemoveListener(resizeEvents)
 		if current != nil {
@@ -384,3 +430,4 @@ func main() {
 	})
 	w.ShowAndRun()
 }
+
