@@ -297,7 +297,7 @@ func main() {
 					if selected == "SSH" && secret == "" && strings.Contains(strings.ToLower(err.Error()), "authentication") {
 						passwordPrompt := widget.NewPasswordEntry()
 						passwordPrompt.SetPlaceHolder("SSH 密码")
-						dialog.ShowForm("SSH 密码", "未能使用 SSH 密钥登录，请输入密码，或取消后检查设备的认证方式。", "重试", "取消",
+						dialog.ShowForm("SSH 登录需要密码", "重试", "取消",
 							[]*widget.FormItem{widget.NewFormItem("密码", passwordPrompt)}, func(ok bool) {
 								if ok {
 									password.SetText(passwordPrompt.Text)
