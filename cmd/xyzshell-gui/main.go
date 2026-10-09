@@ -39,7 +39,7 @@ func main() {
 	host := widget.NewEntry()
 	host.SetPlaceHolder("example.com")
 	user := widget.NewEntry()
-	user.SetPlaceHolder("用户名（可留空）")
+	user.SetPlaceHolder("SSH 用户名（可留空尝试免凭据登录）")
 	port := widget.NewEntry()
 	port.SetText("22")
 	password := widget.NewPasswordEntry()
@@ -67,10 +67,8 @@ func main() {
 	historyText.Selectable = true
 	historyScroll := container.NewScroll(historyText)
 	historyScroll.Direction = fyne.ScrollVerticalOnly
-	terminalTabs := container.NewAppTabs(
-		container.NewTabItem("终端", termView),
-		container.NewTabItem("历史输出", historyScroll),
-	)
+	terminalView := container.NewVSplit(termView, historyScroll)
+	terminalView.SetOffset(0.72)
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
 
@@ -93,6 +91,8 @@ func main() {
 
 	hostField := container.NewVBox(widget.NewLabel("主机"), host)
 	portField := container.NewVBox(widget.NewLabel("端口"), port)
+	userField := container.NewVBox(widget.NewLabel("用户名"), user)
+	passwordField := container.NewVBox(widget.NewLabel("密码"), password)
 	serialField := container.NewVBox(widget.NewLabel("串口"), serialPort)
 	baudField := container.NewVBox(widget.NewLabel("波特率"), baud)
 	dataBitsField := container.NewVBox(widget.NewLabel("数据位"), dataBits)
@@ -194,16 +194,6 @@ func main() {
 			return
 		}
 		selected := protocol.Selected
-		if selected == "SSH" && strings.TrimSpace(user.Text) == "" {
-			dialog.ShowEntryDialog("SSH 用户名", "SSH 需要先确定登录用户名；留空后会在这里询问。", func(value string) {
-				if strings.TrimSpace(value) == "" {
-					return
-				}
-				user.SetText(strings.TrimSpace(value))
-				connectButton.OnTapped()
-			}, w)
-			return
-		}
 		var cfg xyzshell.Config
 		var serialCfg serialclient.Config
 		var profile xyzshell.ConnectionProfile
@@ -294,16 +284,8 @@ func main() {
 				if err != nil {
 					connectButton.Enable()
 					status.SetText("连接失败")
-					if selected == "SSH" && secret == "" && strings.Contains(strings.ToLower(err.Error()), "authentication") {
-						passwordPrompt := widget.NewPasswordEntry()
-						passwordPrompt.SetPlaceHolder("SSH 密码")
-						dialog.ShowForm("SSH 登录需要密码", "重试", "取消",
-							[]*widget.FormItem{widget.NewFormItem("密码", passwordPrompt)}, func(ok bool) {
-								if ok {
-									password.SetText(passwordPrompt.Text)
-									connectButton.OnTapped()
-								}
-							}, w)
+					if selected == "SSH" && strings.TrimSpace(cfg.User) == "" && strings.Contains(strings.ToLower(err.Error()), "auth") {
+						dialog.ShowError(fmt.Errorf("设备未接受 SSH 免凭据登录。SSH 通常需要在建立终端前提供用户名；若设备要在终端内提示账号密码，请选择 Telnet 或串口连接。\n\n详细信息：%w", err), w)
 						return
 					}
 					dialog.ShowError(err, w)
@@ -416,12 +398,12 @@ func main() {
 	})
 
 	fields := container.NewGridWithColumns(6,
-		protocolField, historyField, hostField, portField, user, password,
+		protocolField, historyField, hostField, portField, userField, passwordField,
 		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
 	top := container.NewVBox(fields, recordLog)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(algorithms, connectButton, disconnectButton), status)
-	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, terminalTabs))
+	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, terminalView))
 	w.SetOnClosed(func() {
 		termView.RemoveListener(resizeEvents)
 		if current != nil {
@@ -430,4 +412,3 @@ func main() {
 	})
 	w.ShowAndRun()
 }
-
