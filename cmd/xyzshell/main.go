@@ -17,8 +17,6 @@ import (
 	"xyzshell/pkg/xyzshell"
 )
 
-const version = "0.1.0"
-
 type session interface {
 	Input() io.WriteCloser
 	Output() io.Reader
@@ -28,7 +26,7 @@ type session interface {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "version") {
-		fmt.Println("xyzshell", version)
+		fmt.Println("xyzshell", xyzshell.Version)
 		return
 	}
 	protocol := flag.String("protocol", "ssh", "connection type: ssh, telnet, or serial")
@@ -141,3 +139,4 @@ func fatal(action string, err error) {
 	fmt.Fprintf(os.Stderr, "%s: %v\n", action, err)
 	os.Exit(1)
 }
+
