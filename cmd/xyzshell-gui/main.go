@@ -32,7 +32,7 @@ type terminalSession interface {
 func main() {
 	a := app.NewWithID("io.xyzshell.desktop")
 	w := a.NewWindow("XYZshell")
-	w.Resize(fyne.NewSize(1120, 760))
+	w.Resize(fyne.NewSize(900, 620))
 
 	protocol := widget.NewSelect([]string{"SSH", "Telnet", "Serial"}, nil)
 	protocol.SetSelected("SSH")
@@ -63,14 +63,6 @@ func main() {
 	recordLog := widget.NewCheck("下次连接记录终端输入/输出（可能包含密码）", nil)
 	recordLog.SetChecked(false)
 	termView := terminal.New()
-	historyText := widget.NewLabel("")
-	historyText.TextStyle = fyne.TextStyle{Monospace: true}
-	historyText.Wrapping = fyne.TextWrapBreak
-	historyText.Selectable = true
-	historyScroll := container.NewScroll(historyText)
-	historyScroll.Direction = fyne.ScrollVerticalOnly
-	terminalView := container.NewVSplit(termView, historyScroll)
-	terminalView.SetOffset(0.72)
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
 
@@ -125,8 +117,8 @@ func main() {
 		isSSH := value == "SSH"
 		setVisible(hostField, !isSerial)
 		setVisible(portField, !isSerial)
-		setVisible(user, isSSH)
-		setVisible(password, isSSH)
+		setVisible(userField, isSSH)
+		setVisible(passwordField, isSSH)
 		setVisible(serialField, isSerial)
 		setVisible(refreshPorts, isSerial)
 		setVisible(baudField, isSerial)
@@ -252,7 +244,6 @@ func main() {
 
 		secret := password.Text
 		password.SetText("")
-		historyText.SetText("")
 		saveLog := recordLog.Checked
 		connecting = true
 		connectButton.Disable()
@@ -334,14 +325,13 @@ func main() {
 				_ = s.Resize(initialSize.Rows, initialSize.Columns)
 
 				input := s.Input()
-				output := io.Reader(newScrollbackReader(s.Output(), func(text string) {
-					fyne.Do(func() { historyText.SetText(text) })
-				}))
+				var output io.Reader = s.Output()
 				if recorder != nil {
 					input = recorder.WrapInput(input)
 					output = recorder.WrapOutput(output)
 					status.SetText(status.Text + "；日志：" + recorder.Path())
 				}
+				output = newInterfaceColorReader(output)
 				go func() {
 					_ = termView.RunWithConnection(input, output)
 					resizeMu.Lock()
@@ -399,13 +389,13 @@ func main() {
 		dialog.ShowInformation("SSH 算法能力", body, w)
 	})
 
-	fields := container.NewGridWithColumns(6,
+	fields := container.NewGridWithColumns(4,
 		protocolField, historyField, hostField, portField, userField, passwordField,
 		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
 	top := container.NewVBox(fields, recordLog)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(algorithms, connectButton, disconnectButton), status)
-	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, terminalView))
+	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, termView))
 	w.SetOnClosed(func() {
 		termView.RemoveListener(resizeEvents)
 		if current != nil {
