@@ -31,7 +31,7 @@ type terminalSession interface {
 
 func main() {
 	a := app.NewWithID("io.xyzshell.desktop")
-	w := a.NewWindow("XYZshell")
+	w := a.NewWindow(fmt.Sprintf("XYZshell v%s", xyzshell.Version))
 	w.Resize(fyne.NewSize(900, 620))
 
 	protocol := widget.NewSelect([]string{"SSH", "Telnet", "Serial"}, nil)
