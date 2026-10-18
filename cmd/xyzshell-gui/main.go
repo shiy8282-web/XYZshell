@@ -277,6 +277,8 @@ func main() {
 					case <-time.After(2 * time.Minute):
 						return false
 					}
+				}, func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+					return promptSSHAuthentication(name, instruction, questions, echos, w)
 				})
 			case "Telnet":
 				s, err = telnetclient.Connect(target, networkPort)
@@ -288,10 +290,6 @@ func main() {
 				if err != nil {
 					connectButton.Enable()
 					status.SetText("连接失败")
-					if selected == "SSH" && strings.TrimSpace(cfg.User) == "" && strings.Contains(strings.ToLower(err.Error()), "auth") {
-						dialog.ShowError(fmt.Errorf("设备未接受 SSH 免凭据登录。SSH 通常需要在建立终端前提供用户名；若设备要在终端内提示账号密码，请选择 Telnet 或串口连接。\n\n详细信息：%w", err), w)
-						return
-					}
 					dialog.ShowError(err, w)
 					return
 				}
@@ -411,5 +409,67 @@ func main() {
 		}
 	})
 	w.ShowAndRun()
+}
+
+func promptSSHAuthentication(name, instruction string, questions []string, echos []bool, parent fyne.Window) ([]string, error) {
+	type promptResponse struct {
+		answers []string
+		err     error
+	}
+	response := make(chan promptResponse, 1)
+	fyne.Do(func() {
+		title := strings.TrimSpace(name)
+		if title == "" {
+			title = "SSH 身份验证"
+		}
+		if len(questions) == 0 {
+			message := strings.TrimSpace(instruction)
+			if message == "" {
+				response <- promptResponse{}
+				return
+			}
+			dialog.ShowConfirm(title, message, func(ok bool) {
+				if !ok {
+					response <- promptResponse{err: fmt.Errorf("SSH 身份验证已取消")}
+					return
+				}
+				response <- promptResponse{}
+			}, parent)
+			return
+		}
+
+		items := make([]*widget.FormItem, 0, len(questions)+1)
+		if strings.TrimSpace(instruction) != "" {
+			items = append(items, widget.NewFormItem("", widget.NewLabel(instruction)))
+		}
+		entries := make([]*widget.Entry, len(questions))
+		for i, question := range questions {
+			if i < len(echos) && !echos[i] {
+				entries[i] = widget.NewPasswordEntry()
+			} else {
+				entries[i] = widget.NewEntry()
+			}
+			items = append(items, widget.NewFormItem(question, entries[i]))
+		}
+		dialog.ShowForm(title, "提交", "取消", items, func(ok bool) {
+			if !ok {
+				response <- promptResponse{err: fmt.Errorf("SSH 身份验证已取消")}
+				return
+			}
+			answers := make([]string, len(entries))
+			for i, entry := range entries {
+				answers[i] = entry.Text
+				entry.SetText("")
+			}
+			response <- promptResponse{answers: answers}
+		}, parent)
+	})
+
+	select {
+	case result := <-response:
+		return result.answers, result.err
+	case <-time.After(2 * time.Minute):
+		return nil, fmt.Errorf("等待 SSH 身份验证输入超时")
+	}
 }
 
