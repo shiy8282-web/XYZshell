@@ -140,11 +140,12 @@ jobs:
           set -euo pipefail
           package_dir="dist/XYZshell-macos-$ASSET_ARCH"
           app_dir="$package_dir/XYZshell.app/Contents"
+          version="$(tr -d '[:space:]' < pkg/xyzshell/VERSION)"
           mkdir -p "$app_dir/MacOS"
           CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$app_dir/MacOS/XYZshell" ./cmd/xyzshell-gui
           CGO_ENABLED=1 GOOS=darwin GOARCH="$GOARCH" go build -trimpath -ldflags="-s -w" -o "$package_dir/xyzshell-cli" ./cmd/xyzshell
           chmod +x "$app_dir/MacOS/XYZshell" "$package_dir/xyzshell-cli"
-          cat > "$app_dir/Info.plist" <<'EOF'
+          cat > "$app_dir/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -153,8 +154,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>com.shiy8282.xyzshell</string>
             <key>CFBundleName</key><string>XYZshell</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>CFBundleShortVersionString</key><string>0.1.0</string>
-            <key>CFBundleVersion</key><string>0.1.0</string>
+            <key>CFBundleShortVersionString</key><string>$version</string>
+            <key>CFBundleVersion</key><string>$version</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
             <key>NSHighResolutionCapable</key><true/>
           </dict>
@@ -168,3 +169,4 @@ jobs:
           path: dist/XYZshell-macos-${{ matrix.asset_arch }}.zip
           if-no-files-found: error
           retention-days: 14
+
