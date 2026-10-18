@@ -13,6 +13,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 	"github.com/fyne-io/terminal"
 	"xyzshell/pkg/serialclient"
@@ -83,16 +84,24 @@ func main() {
 		}
 	}()
 
-	hostField := container.NewVBox(widget.NewLabel("主机"), host)
-	portField := container.NewVBox(widget.NewLabel("端口"), port)
-	userField := container.NewVBox(widget.NewLabel("用户名"), user)
-	passwordField := container.NewVBox(widget.NewLabel("密码"), password)
-	serialField := container.NewVBox(widget.NewLabel("串口"), serialPort)
-	baudField := container.NewVBox(widget.NewLabel("波特率"), baud)
-	dataBitsField := container.NewVBox(widget.NewLabel("数据位"), dataBits)
-	parityField := container.NewVBox(widget.NewLabel("校验位"), parity)
-	stopBitsField := container.NewVBox(widget.NewLabel("停止位"), stopBits)
-	historyField := container.NewVBox(widget.NewLabel("最近连接"), historySelect)
+	inlineField := func(label string, control fyne.CanvasObject, width float32) fyne.CanvasObject {
+		labelWidget := widget.NewLabel(label)
+		if width > 0 {
+			fixedControl := container.NewGridWrap(fyne.NewSize(width, control.MinSize().Height), control)
+			return container.NewHBox(labelWidget, fixedControl, layout.NewSpacer())
+		}
+		return container.NewHBox(labelWidget, control)
+	}
+	hostField := inlineField("主机", host, 0)
+	portField := inlineField("端口", port, 72)
+	userField := inlineField("用户名", user, 0)
+	passwordField := inlineField("密码", password, 0)
+	serialField := inlineField("串口", serialPort, 0)
+	baudField := inlineField("波特率", baud, 72)
+	dataBitsField := inlineField("数据位", dataBits, 64)
+	parityField := inlineField("校验位", parity, 76)
+	stopBitsField := inlineField("停止位", stopBits, 60)
+	historyField := inlineField("最近连接", historySelect, 120)
 	refreshPorts := widget.NewButton("刷新串口", func() {
 		ports, err := serialclient.ListPorts()
 		if err != nil {
@@ -104,7 +113,7 @@ func main() {
 			serialPort.SetText(ports[0])
 		}
 	})
-	protocolField := container.NewVBox(widget.NewLabel("连接方式"), protocol)
+	protocolField := inlineField("连接方式", protocol, 92)
 	setVisible := func(obj fyne.CanvasObject, visible bool) {
 		if visible {
 			obj.Show()
