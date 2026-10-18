@@ -40,13 +40,13 @@ func main() {
 	host := widget.NewEntry()
 	host.SetPlaceHolder("example.com")
 	user := widget.NewEntry()
-	user.SetPlaceHolder("SSH 用户名（可留空尝试免凭据登录）")
+	user.SetPlaceHolder("SSH 用户名")
 	user.Wrapping = fyne.TextWrapOff
 	user.Scroll = fyne.ScrollNone
 	port := widget.NewEntry()
 	port.SetText("22")
 	password := widget.NewPasswordEntry()
-	password.SetPlaceHolder("密码（可留空）")
+	password.SetPlaceHolder("密码")
 	serialPort := widget.NewSelectEntry(nil)
 	serialPort.SetPlaceHolder("COM3 或 /dev/ttyUSB0")
 	baud := widget.NewEntry()
@@ -96,7 +96,7 @@ func main() {
 	portField := inlineField("端口", port, 72)
 	userField := inlineField("用户名", user, 180)
 	passwordField := inlineField("密码", password, 180)
-	serialField := inlineField("串口", serialPort, 0)
+	serialField := inlineField("串口", serialPort, 92)
 	baudField := inlineField("波特率", baud, 72)
 	dataBitsField := inlineField("数据位", dataBits, 64)
 	parityField := inlineField("校验位", parity, 76)
@@ -114,11 +114,11 @@ func main() {
 		}
 	})
 	protocolField := inlineField("连接方式", protocol, 92)
-	connectionFields := container.NewGridWithColumns(4,
-		protocolField, hostField, portField, historyField)
+	connectionFields := container.NewHBox(
+		protocolField, hostField, portField, historyField, layout.NewSpacer())
 	authFields := container.NewHBox(userField, passwordField, recordLog, layout.NewSpacer())
-	serialFields := container.NewGridWithColumns(6,
-		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
+	serialFields := container.NewHBox(
+		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField, layout.NewSpacer())
 	serialFields.Hide()
 	setVisible := func(obj fyne.CanvasObject, visible bool) {
 		if visible {
