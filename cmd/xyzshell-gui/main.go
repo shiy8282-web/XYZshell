@@ -92,16 +92,16 @@ func main() {
 		}
 		return container.NewHBox(labelWidget, control)
 	}
-	hostField := inlineField("主机", host, 0)
+	hostField := inlineField("主机", host, 150)
 	portField := inlineField("端口", port, 72)
-	userField := inlineField("用户名", user, 0)
-	passwordField := inlineField("密码", password, 0)
+	userField := inlineField("用户名", user, 180)
+	passwordField := inlineField("密码", password, 180)
 	serialField := inlineField("串口", serialPort, 0)
 	baudField := inlineField("波特率", baud, 72)
 	dataBitsField := inlineField("数据位", dataBits, 64)
 	parityField := inlineField("校验位", parity, 76)
 	stopBitsField := inlineField("停止位", stopBits, 60)
-	historyField := inlineField("最近连接", historySelect, 120)
+	historyField := inlineField("最近连接", historySelect, 150)
 	refreshPorts := widget.NewButton("刷新串口", func() {
 		ports, err := serialclient.ListPorts()
 		if err != nil {
@@ -114,6 +114,12 @@ func main() {
 		}
 	})
 	protocolField := inlineField("连接方式", protocol, 92)
+	connectionFields := container.NewGridWithColumns(4,
+		protocolField, hostField, portField, historyField)
+	authFields := container.NewHBox(userField, passwordField, recordLog, layout.NewSpacer())
+	serialFields := container.NewGridWithColumns(6,
+		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
+	serialFields.Hide()
 	setVisible := func(obj fyne.CanvasObject, visible bool) {
 		if visible {
 			obj.Show()
@@ -129,11 +135,7 @@ func main() {
 		setVisible(userField, isSSH)
 		setVisible(passwordField, isSSH)
 		setVisible(serialField, isSerial)
-		setVisible(refreshPorts, isSerial)
-		setVisible(baudField, isSerial)
-		setVisible(dataBitsField, isSerial)
-		setVisible(parityField, isSerial)
-		setVisible(stopBitsField, isSerial)
+		setVisible(serialFields, isSerial)
 		if value == "Telnet" && port.Text == "22" {
 			port.SetText("23")
 		} else if value == "SSH" && port.Text == "23" {
@@ -398,10 +400,7 @@ func main() {
 		dialog.ShowInformation("SSH 算法能力", body, w)
 	})
 
-	fields := container.NewGridWithColumns(4,
-		protocolField, historyField, hostField, portField, userField, passwordField,
-		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField)
-	top := container.NewVBox(fields, recordLog)
+	top := container.NewVBox(connectionFields, authFields, serialFields)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(algorithms, connectButton, disconnectButton), status)
 	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, termView))
