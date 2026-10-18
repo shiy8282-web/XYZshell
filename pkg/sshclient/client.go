@@ -39,7 +39,10 @@ type Client struct {
 // rejected and cannot be overridden through this prompt.
 type TrustPrompt func(host, fingerprint string) bool
 
-func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask TrustPrompt) (*Client, error) {
+// AuthPrompt handles server-issued SSH keyboard-interactive questions.
+type AuthPrompt = ssh.KeyboardInteractiveChallenge
+
+func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask TrustPrompt, authPrompts ...AuthPrompt) (*Client, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -86,6 +89,9 @@ func Connect(ctx context.Context, cfg xyzshell.Config, password string, ask Trus
 	}
 	if signers := defaultKeySigners(); len(signers) > 0 {
 		authMethods = append(authMethods, ssh.PublicKeys(signers...))
+	}
+	if len(authPrompts) > 0 && authPrompts[0] != nil {
+		authMethods = append(authMethods, ssh.KeyboardInteractive(authPrompts[0]))
 	}
 	clientConfig := &ssh.ClientConfig{
 		User:            cfg.User,
