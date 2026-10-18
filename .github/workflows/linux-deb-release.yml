@@ -22,7 +22,7 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - name: Resolve tag and create release if needed
+      - name: Resolve release tag
         id: meta
         env:
           GH_TOKEN: ${{ github.token }}
@@ -38,8 +38,30 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "XYZshell $tag" --generate-notes
+      - name: Check version file matches release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+      - name: Validate application version
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_version="$(tr -d '[:space:]' < pkg/xyzshell/VERSION)"
+          if [[ "$source_version" != "$RELEASE_VERSION" ]]; then
+            echo "Release tag version $RELEASE_VERSION does not match pkg/xyzshell/VERSION ($source_version)" >&2
+            exit 1
+          fi
+      - name: Create release if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "XYZshell $RELEASE_TAG" --generate-notes
           fi
 
   build-linux:
@@ -342,3 +364,4 @@ jobs:
           ASSET_ARCH: ${{ matrix.asset_arch }}
         shell: bash
         run: gh release upload "$TAG" "dist/XYZshell-macos-"$ASSET_ARCH"-v"$VERSION".zip" --repo "$GITHUB_REPOSITORY" --clobber
+
