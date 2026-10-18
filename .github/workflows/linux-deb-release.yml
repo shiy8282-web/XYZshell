@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing release tag, for example 0.1.0
+        description: Version to publish, matching pkg/xyzshell/VERSION, for example 0.1.9
         required: true
-        default: "0.1.0"
+        default: "0.1.9"
   push:
     tags:
       - "v*"
@@ -38,11 +38,9 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Check version file matches release tag
+      - name: Check out workflow source
         uses: actions/checkout@v5
-        with:
-          ref: ${{ steps.meta.outputs.tag }}
-      - name: Validate application version
+      - name: Validate workflow source version
         env:
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
         shell: bash
@@ -57,11 +55,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          TARGET_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
           if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --title "XYZshell $RELEASE_TAG" --generate-notes
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --target "$TARGET_SHA" --title "XYZshell $RELEASE_TAG" --generate-notes
+          fi
+      - name: Check out release tag
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.meta.outputs.tag }}
+      - name: Validate release tag version
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_version="$(tr -d '[:space:]' < pkg/xyzshell/VERSION)"
+          if [[ "$source_version" != "$RELEASE_VERSION" ]]; then
+            echo "Release tag version $RELEASE_VERSION does not match pkg/xyzshell/VERSION ($source_version)" >&2
+            exit 1
           fi
 
   build-linux:
