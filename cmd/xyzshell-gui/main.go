@@ -40,6 +40,8 @@ func main() {
 	host.SetPlaceHolder("example.com")
 	user := widget.NewEntry()
 	user.SetPlaceHolder("SSH 用户名（可留空尝试免凭据登录）")
+	user.Wrapping = fyne.TextWrapOff
+	user.Scroll = fyne.ScrollNone
 	port := widget.NewEntry()
 	port.SetText("22")
 	password := widget.NewPasswordEntry()
@@ -412,3 +414,4 @@ func main() {
 	})
 	w.ShowAndRun()
 }
+
