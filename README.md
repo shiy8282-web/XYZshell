@@ -2,6 +2,10 @@
 
 XYZshell is a cross-platform terminal client with a native Fyne desktop GUI, a CLI, and reusable Go connection packages. It supports SSH, Telnet, and serial connections.
 
+## Version
+
+The application version is stored in `pkg/xyzshell/VERSION`. The GUI window title and `xyzshell --version` use this value. Before publishing a release, update this file and create a GitHub release tag with the same version, such as `0.1.1`.
+
 ## Connection types
 
 - **SSH**: password authentication, first-use host-key fingerprint confirmation, and trusted key storage in the user's configuration directory under XYZshell/known_hosts. Changed host keys are rejected.
@@ -87,3 +91,4 @@ go env -w GOPROXY=https://goproxy.cn,direct
 ## API
 
 pkg/sshclient, pkg/telnetclient, and pkg/serialclient expose the connection implementations. Connection history and session logs are stored in the user's XYZshell configuration directory.
+
