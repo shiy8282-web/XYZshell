@@ -68,17 +68,19 @@ func main() {
 	historyScroll := container.NewVScroll(historyLabel)
 	scrollbackPanel := container.NewBorder(nil, nil, nil, nil)
 	scrollbackPanel.Hide()
-	scrollbackPanel = container.NewBorder(widget.NewButton("返回实时终端", func() {
+	returnToLive := func() {
 		scrollbackPanel.Hide()
 		termView.Show()
-	}), nil, nil, nil, historyScroll)
-	terminalArea := container.NewMax(termView, scrollbackPanel)
-	scrollbackButton := widget.NewButton("回看滚屏", func() {
+	}
+	scrollbackView := &scrollbackScroll{Scroll: historyScroll, onReturn: returnToLive}
+	scrollbackPanel = container.NewBorder(nil, nil, nil, nil, scrollbackView)
+	showScrollback := func() {
 		historyLabel.SetText(historyBuffer.Text())
 		termView.Hide()
 		scrollbackPanel.Show()
 		historyScroll.ScrollToBottom()
-	})
+	}
+	terminalArea := container.NewMax(&scrollbackTerminal{Terminal: termView, onScrollback: showScrollback}, scrollbackPanel)
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
 
@@ -413,7 +415,7 @@ func main() {
 
 	top := container.NewVBox(connectionFields, authFields, serialFields)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewHBox(algorithms, scrollbackButton, connectButton, disconnectButton), status)
+		container.NewHBox(algorithms, connectButton, disconnectButton), status)
 	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, terminalArea))
 	w.SetOnClosed(func() {
 		termView.RemoveListener(resizeEvents)
