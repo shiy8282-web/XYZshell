@@ -61,9 +61,24 @@ func main() {
 	history := []xyzshell.ConnectionProfile{}
 	status := widget.NewLabel("未连接")
 	cipherStatus := widget.NewLabel("加密方式：未连接")
-	recordLog := widget.NewCheck("下次连接记录终端输入/输出（可能包含密码）", nil)
-	recordLog.SetChecked(false)
 	termView := terminal.New()
+	historyBuffer := &scrollbackBuffer{}
+	historyLabel := widget.NewLabel("")
+	historyLabel.Wrapping = fyne.TextWrapWord
+	historyScroll := container.NewVScroll(historyLabel)
+	scrollbackPanel := container.NewBorder(nil, nil, nil, nil)
+	scrollbackPanel.Hide()
+	scrollbackPanel = container.NewBorder(widget.NewButton("返回实时终端", func() {
+		scrollbackPanel.Hide()
+		termView.Show()
+	}), nil, nil, nil, historyScroll)
+	terminalArea := container.NewMax(termView, scrollbackPanel)
+	scrollbackButton := widget.NewButton("回看滚屏", func() {
+		historyLabel.SetText(historyBuffer.Text())
+		termView.Hide()
+		scrollbackPanel.Show()
+		historyScroll.ScrollToBottom()
+	})
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
 
@@ -116,7 +131,7 @@ func main() {
 	protocolField := inlineField("连接方式", protocol, 92)
 	connectionFields := container.NewHBox(
 		protocolField, hostField, portField, historyField, layout.NewSpacer())
-	authFields := container.NewHBox(userField, passwordField, recordLog, layout.NewSpacer())
+	authFields := container.NewHBox(userField, passwordField, layout.NewSpacer())
 	serialFields := container.NewHBox(
 		serialField, refreshPorts, baudField, dataBitsField, parityField, stopBitsField, layout.NewSpacer())
 	serialFields.Hide()
@@ -255,7 +270,6 @@ func main() {
 
 		secret := password.Text
 		password.SetText("")
-		saveLog := recordLog.Checked
 		connecting = true
 		connectButton.Disable()
 		status.SetText("正在连接…")
@@ -293,18 +307,18 @@ func main() {
 					dialog.ShowError(err, w)
 					return
 				}
-				var recorder *sessionlog.Recorder
-				if saveLog {
-					recorder, err = sessionlog.New(profile)
-					if err != nil {
-						_ = s.Close()
-						connectButton.Enable()
-						status.SetText("日志文件创建失败")
-						dialog.ShowError(err, w)
-						return
-					}
+				recorder, err := sessionlog.New(profile)
+				if err != nil {
+					_ = s.Close()
+					connectButton.Enable()
+					status.SetText("日志文件创建失败")
+					dialog.ShowError(err, w)
+					return
 				}
 				current = s
+				historyBuffer.Reset()
+				scrollbackPanel.Hide()
+				termView.Show()
 				connectButton.Disable()
 				disconnectButton.Enable()
 				switch selected {
@@ -335,11 +349,10 @@ func main() {
 
 				input := s.Input()
 				var output io.Reader = s.Output()
-				if recorder != nil {
-					input = recorder.WrapInput(input)
-					output = recorder.WrapOutput(output)
-					status.SetText(status.Text + "；日志：" + recorder.Path())
-				}
+				input = recorder.WrapInput(input)
+				output = recorder.WrapOutput(output)
+				output = &scrollbackReader{source: output, buffer: historyBuffer}
+				status.SetText(status.Text + "；日志（可能含密码）:" + recorder.Path())
 				output = newInterfaceColorReader(output)
 				go func() {
 					_ = termView.RunWithConnection(input, output)
@@ -400,8 +413,8 @@ func main() {
 
 	top := container.NewVBox(connectionFields, authFields, serialFields)
 	header := container.NewBorder(nil, nil, widget.NewLabelWithStyle("XYZshell", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		container.NewHBox(algorithms, connectButton, disconnectButton), status)
-	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, termView))
+		container.NewHBox(algorithms, scrollbackButton, connectButton, disconnectButton), status)
+	w.SetContent(container.NewBorder(container.NewVBox(header, top), cipherStatus, nil, nil, terminalArea))
 	w.SetOnClosed(func() {
 		termView.RemoveListener(resizeEvents)
 		if current != nil {

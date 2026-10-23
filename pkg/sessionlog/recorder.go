@@ -29,15 +29,19 @@ func New(profile xyzshell.ConnectionProfile) (*Recorder, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
-	base := safeFileName(profile.DisplayName())
+	device := profile.Host
+	if device == "" {
+		device = profile.SerialPort
+	}
+	base := safeFileName(device)
 	if base == "" {
 		base = "session"
 	}
 	stamp := time.Now().Format("20060102-150405")
 	for suffix := 0; ; suffix++ {
-		name := fmt.Sprintf("%s-%s.log", stamp, base)
+		name := fmt.Sprintf("%s-%s.txt", base, stamp)
 		if suffix > 0 {
-			name = fmt.Sprintf("%s-%s-%d.log", stamp, base, suffix)
+			name = fmt.Sprintf("%s-%s-%d.txt", base, stamp, suffix)
 		}
 		path := filepath.Join(dir, name)
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -81,7 +85,7 @@ func (r *Recorder) Close() error {
 func (r *Recorder) writeHeader(profile xyzshell.ConnectionProfile) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, err := fmt.Fprintf(r.file, "XYZshell session log\nStarted: %s\nConnection: %s\n\n",
+	_, err := fmt.Fprintf(r.file, "XYZshell session log\nStarted: %s\nConnection: %s\nNote: raw terminal input/output may include passwords or other sensitive data.\n\n",
 		time.Now().Format(time.RFC3339), profile.DisplayName())
 	if err != nil {
 		return fmt.Errorf("write session log header: %w", err)

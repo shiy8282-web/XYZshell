@@ -39,7 +39,9 @@ func (r *interfaceColorReader) Read(p []byte) (int, error) {
 			r.output = append(r.output, r.partial...)
 			r.partial = nil
 		} else if len(r.block) > 0 && len(r.partial) > 0 && isOutputBoundary(strings.TrimSpace(stripANSI(string(r.partial)))) {
-			r.flushBlock()
+			if !isMoreMarker(strings.TrimSpace(stripANSI(string(r.partial)))) {
+				r.flushBlock()
+			}
 			r.output = append(r.output, r.partial...)
 			r.partial = nil
 		}
@@ -84,7 +86,9 @@ func (r *interfaceColorReader) processLine(line []byte) {
 		return
 	}
 	if plain == "!" || isOutputBoundary(plain) {
-		r.flushBlock()
+		if !isMoreMarker(plain) {
+			r.flushBlock()
+		}
 		r.output = append(r.output, line...)
 		return
 	}
@@ -177,7 +181,12 @@ func isPrompt(line string) bool {
 
 func isOutputBoundary(line string) bool {
 	lower := strings.ToLower(line)
-	return isPrompt(line) || strings.Contains(lower, "--more--") || strings.Contains(lower, "<--- more --->")
+	return isPrompt(line) || isMoreMarker(lower)
+}
+
+func isMoreMarker(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	return strings.Contains(lower, "--more--") || strings.Contains(lower, "<--- more --->")
 }
 
 func couldStartInterface(partial []byte) bool {
@@ -194,7 +203,7 @@ func containsAny(text string, fragments ...string) bool {
 	return false
 }
 
-var wordBoundary = regexp.MustCompile(`(^|[^a-z0-9_-])shutdown([^a-z0-9_-]|$)`)
+var shutdownCommand = regexp.MustCompile(`^shutdown(?:\s|$)`)
 
 func hasShutdown(lines []string) bool {
 	for _, line := range lines {
@@ -202,7 +211,7 @@ func hasShutdown(lines []string) bool {
 		if strings.HasPrefix(line, "no shutdown") || strings.HasPrefix(line, "undo shutdown") {
 			continue
 		}
-		if wordBoundary.MatchString(line) {
+		if shutdownCommand.MatchString(line) {
 			return true
 		}
 	}
