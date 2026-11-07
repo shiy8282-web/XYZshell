@@ -3,6 +3,7 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"github.com/fyne-io/terminal"
 )
 
@@ -11,6 +12,17 @@ import (
 type scrollbackTerminal struct {
 	*terminal.Terminal
 	onScrollback func()
+}
+
+// MouseDown focuses the wrapper that is actually embedded in the Fyne canvas.
+// The embedded Terminal's own MouseDown method looks itself up in the canvas,
+// but the wrapper is the object present there, so that lookup can fail and
+// keyboard input is then never delivered to the terminal.
+func (t *scrollbackTerminal) MouseDown(ev *desktop.MouseEvent) {
+	if c := fyne.CurrentApp().Driver().CanvasForObject(t); c != nil {
+		c.Focus(t)
+	}
+	t.Terminal.MouseDown(ev)
 }
 
 func (t *scrollbackTerminal) Scrolled(ev *fyne.ScrollEvent) {
