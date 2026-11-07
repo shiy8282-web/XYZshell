@@ -128,6 +128,30 @@ jobs:
           EOF
           deb="dist/xyzshell_"$VERSION"_amd64.deb"
           dpkg-deb --build --root-owner-group "$package_root" "$deb"
+      - name: Build portable Linux AMD64 archive
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          portable="dist/XYZshell-linux-amd64"
+          mkdir -p "$portable"
+          cp dist/package/usr/bin/xyzshell-gui "$portable/"
+          cp dist/package/usr/bin/xyzshell-cli "$portable/"
+          cat > "$portable/run.sh" <<'EOF'
+          #!/bin/sh
+          set -eu
+          dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          exec "$dir/xyzshell-gui" "$@"
+          EOF
+          cat > "$portable/README.txt" <<'EOF'
+          XYZshell Linux AMD64 portable package
+          Extract this archive, then run ./run.sh for the graphical application
+          or ./xyzshell-cli for the command-line client.
+          A 64-bit Linux desktop with the graphics libraries used by Fyne is required.
+          EOF
+          chmod +x "$portable/xyzshell-gui" "$portable/xyzshell-cli" "$portable/run.sh"
+          tar -czf "dist/XYZshell-linux-amd64-v$VERSION.tar.gz" -C dist XYZshell-linux-amd64
       - name: Upload Debian package to release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -135,6 +159,13 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         shell: bash
         run: gh release upload "$TAG" "dist/xyzshell_"$VERSION"_amd64.deb" --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Upload portable Linux AMD64 archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: gh release upload "$TAG" "dist/XYZshell-linux-amd64-v$VERSION.tar.gz" --repo "$GITHUB_REPOSITORY" --clobber
 
   build-linux-arm64:
     needs: prepare
