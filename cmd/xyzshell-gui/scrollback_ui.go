@@ -11,7 +11,7 @@ import (
 // buffered output, as it does in desktop terminal clients.
 type scrollbackTerminal struct {
 	*terminal.Terminal
-	onScrollback func()
+	onScrollback func(*fyne.ScrollEvent)
 }
 
 // MouseDown focuses the wrapper that is actually embedded in the Fyne canvas.
@@ -27,7 +27,7 @@ func (t *scrollbackTerminal) MouseDown(ev *desktop.MouseEvent) {
 
 func (t *scrollbackTerminal) Scrolled(ev *fyne.ScrollEvent) {
 	if ev.Scrolled.DY > 0 && t.onScrollback != nil {
-		t.onScrollback()
+		t.onScrollback(ev)
 	}
 }
 
