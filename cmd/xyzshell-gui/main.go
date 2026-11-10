@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/fyne-io/terminal"
 	"xyzshell/pkg/serialclient"
@@ -32,6 +33,7 @@ type terminalSession interface {
 
 func main() {
 	a := app.NewWithID("io.xyzshell.desktop")
+	a.Settings().SetTheme(persistentScrollbarTheme{Theme: theme.DefaultTheme()})
 	w := a.NewWindow(fmt.Sprintf("XYZshell v%s", xyzshell.Version))
 	w.Resize(fyne.NewSize(900, 620))
 
@@ -74,11 +76,14 @@ func main() {
 	}
 	scrollbackView := &scrollbackScroll{Scroll: historyScroll, onReturn: returnToLive}
 	scrollbackPanel = container.NewBorder(nil, nil, nil, nil, scrollbackView)
-	showScrollback := func() {
+	showScrollback := func(ev *fyne.ScrollEvent) {
 		historyLabel.SetText(historyBuffer.Text())
 		termView.Hide()
 		scrollbackPanel.Show()
 		historyScroll.ScrollToBottom()
+		// Apply the wheel movement that opened the history view so its scrollbar
+		// moves immediately instead of requiring a second wheel gesture.
+		historyScroll.Scrolled(ev)
 	}
 	terminalArea := container.NewMax(&scrollbackTerminal{Terminal: termView, onScrollback: showScrollback}, scrollbackPanel)
 	resizeEvents := make(chan terminal.Config, 1)
