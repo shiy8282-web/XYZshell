@@ -65,7 +65,7 @@ func main() {
 	cipherStatus := widget.NewLabel("加密方式：未连接")
 	termView := terminal.New()
 	historyBuffer := &scrollbackBuffer{}
-	historyLabel := widget.NewLabel("")
+	historyLabel := widget.NewRichText()
 	historyLabel.Wrapping = fyne.TextWrapWord
 	historyScroll := container.NewVScroll(historyLabel)
 	scrollbackPanel := container.NewBorder(nil, nil, nil, nil)
@@ -77,7 +77,8 @@ func main() {
 	scrollbackView := &scrollbackScroll{Scroll: historyScroll, onReturn: returnToLive}
 	scrollbackPanel = container.NewBorder(nil, nil, nil, nil, scrollbackView)
 	showScrollback := func(ev *fyne.ScrollEvent) {
-		historyLabel.SetText(historyBuffer.Text())
+		historyLabel.Segments = historyBuffer.Segments()
+		historyLabel.Refresh()
 		termView.Hide()
 		scrollbackPanel.Show()
 		historyScroll.ScrollToBottom()
