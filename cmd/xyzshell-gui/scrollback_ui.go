@@ -7,6 +7,8 @@ import (
 	"github.com/fyne-io/terminal"
 )
 
+const maxScrollWheelDelta = 48
+
 // scrollbackTerminal makes the normal mouse wheel open the current connection's
 // buffered output, as it does in desktop terminal clients.
 type scrollbackTerminal struct {
@@ -39,6 +41,20 @@ type scrollbackScroll struct {
 }
 
 func (s *scrollbackScroll) Scrolled(ev *fyne.ScrollEvent) {
+	// GLFW applies strong acceleration to fast wheel input on Windows. Cap each
+	// event to a few text rows so one wheel tick cannot jump to the top or
+	// bottom of a long session. The underlying Scroll still updates its thumb
+	// on every event, keeping it synchronized with the viewport.
+	limited := *ev
+	deltaY := limited.Scrolled.DY
+	if deltaY > maxScrollWheelDelta {
+		deltaY = maxScrollWheelDelta
+	} else if deltaY < -maxScrollWheelDelta {
+		deltaY = -maxScrollWheelDelta
+	}
+	limited.Scrolled = fyne.NewDelta(limited.Scrolled.DX, deltaY)
+	ev = &limited
+
 	maxOffset := s.Content.MinSize().Height - s.Size().Height
 	if maxOffset < 0 {
 		maxOffset = 0
