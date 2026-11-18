@@ -2,6 +2,8 @@
 
 XYZshell is a cross-platform terminal client with a native Fyne desktop GUI, a CLI, and reusable Go connection packages. It supports SSH, Telnet, and serial connections.
 
+The GUI keeps the live terminal and its scrollback in one continuous, scrollable terminal view.
+
 ## Version
 
 The application version is stored in `pkg/xyzshell/VERSION`. The GUI window title and `xyzshell --version` use this value. Before publishing a release, update this file and create a GitHub release tag with the same version, such as `0.1.1`.

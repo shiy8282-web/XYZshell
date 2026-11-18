@@ -2,6 +2,8 @@ module xyzshell
 
 go 1.27.1
 
+replace github.com/fyne-io/terminal => ./third_party/fyne-terminal
+
 require (
 	fyne.io/fyne/v2 v2.8.1
 	github.com/fyne-io/terminal v0.0.0-20260927151117-c8f30fa130e3

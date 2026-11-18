@@ -64,30 +64,29 @@ func main() {
 	status := widget.NewLabel("未连接")
 	cipherStatus := widget.NewLabel("加密方式：未连接")
 	termView := terminal.New()
-	historyBuffer := &scrollbackBuffer{}
-	historyLabel := widget.NewRichText()
-	historyLabel.Wrapping = fyne.TextWrapWord
-	historyScroll := container.NewVScroll(historyLabel)
-	scrollbackPanel := container.NewBorder(nil, nil, nil, nil)
-	scrollbackPanel.Hide()
-	returnToLive := func() {
-		scrollbackPanel.Hide()
-		termView.Show()
-	}
-	scrollbackView := &scrollbackScroll{Scroll: historyScroll, onReturn: returnToLive}
-	scrollbackPanel = container.NewBorder(nil, nil, nil, nil, scrollbackView)
-	showScrollback := func(ev *fyne.ScrollEvent) {
-		historyLabel.Segments = historyBuffer.Segments()
-		historyLabel.Refresh()
-		termView.Hide()
-		scrollbackPanel.Show()
-		historyScroll.Refresh()
-		historyScroll.ScrollToBottom()
-		// Reuse the same capped scroll path as later wheel events. Fyne may
-		// accelerate the opening event enough to skip the entire history buffer.
-		scrollbackView.Scrolled(ev)
-	}
-	terminalArea := container.NewMax(&scrollbackTerminal{Terminal: termView, onScrollback: showScrollback}, scrollbackPanel)
+	historyGrid := widget.NewTextGrid()
+	historyGrid.Scroll = fyne.ScrollNone
+	historyRows := &scrollbackRowQueue{}
+	termView.SetScrollbackHandler(historyRows.Append)
+	liveTerminal := &scrollbackTerminal{Terminal: termView, viewportHeight: 420}
+	scrollbackContent := container.NewVBox(historyGrid, liveTerminal)
+	historyScroll := container.NewVScroll(scrollbackContent)
+	scrollbackView := &scrollbackScroll{Scroll: historyScroll, terminal: liveTerminal, history: historyGrid}
+	liveTerminal.onScroll = scrollbackView.Scrolled
+	terminalArea := scrollbackView
+	go func() {
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			rows, dropped := historyRows.Drain()
+			if len(rows) == 0 && dropped == 0 {
+				continue
+			}
+			fyne.Do(func() {
+				scrollbackView.AppendRows(rows, dropped)
+			})
+		}
+	}()
 	resizeEvents := make(chan terminal.Config, 1)
 	termView.AddListener(resizeEvents)
 
@@ -325,9 +324,9 @@ func main() {
 					return
 				}
 				current = s
-				historyBuffer.Reset()
-				scrollbackPanel.Hide()
-				termView.Show()
+				historyRows.Reset()
+				scrollbackView.ResetHistory()
+				scrollbackView.ScrollToBottom()
 				connectButton.Disable()
 				disconnectButton.Enable()
 				switch selected {
@@ -360,7 +359,6 @@ func main() {
 				var output io.Reader = s.Output()
 				input = recorder.WrapInput(input)
 				output = recorder.WrapOutput(output)
-				output = &scrollbackReader{source: output, buffer: historyBuffer}
 				status.SetText(status.Text + "；日志（可能含密码）:" + recorder.Path())
 				output = newInterfaceColorReader(output)
 				go func() {
@@ -494,4 +492,3 @@ func promptSSHAuthentication(name, instruction string, questions []string, echos
 		return nil, fmt.Errorf("等待 SSH 身份验证输入超时")
 	}
 }
-
