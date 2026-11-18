@@ -110,7 +110,11 @@ func appendRichTextSegment(segments *[]widget.RichTextSegment, text string, colo
 	}
 	*segments = append(*segments, &widget.TextSegment{
 		Text:  text,
-		Style: widget.RichTextStyle{Inline: true, ColorName: colorName},
+		Style: widget.RichTextStyle{
+			Inline:    true,
+			ColorName: colorName,
+			TextStyle: fyne.TextStyle{Monospace: true},
+		},
 	})
 }
 
