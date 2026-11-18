@@ -81,10 +81,11 @@ func main() {
 		historyLabel.Refresh()
 		termView.Hide()
 		scrollbackPanel.Show()
+		historyScroll.Refresh()
 		historyScroll.ScrollToBottom()
-		// Apply the wheel movement that opened the history view so its scrollbar
-		// moves immediately instead of requiring a second wheel gesture.
-		historyScroll.Scrolled(ev)
+		// Reuse the same capped scroll path as later wheel events. Fyne may
+		// accelerate the opening event enough to skip the entire history buffer.
+		scrollbackView.Scrolled(ev)
 	}
 	terminalArea := container.NewMax(&scrollbackTerminal{Terminal: termView, onScrollback: showScrollback}, scrollbackPanel)
 	resizeEvents := make(chan terminal.Config, 1)
