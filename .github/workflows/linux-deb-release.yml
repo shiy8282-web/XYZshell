@@ -2,11 +2,6 @@ name: XYZshell release packages
 
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Version to publish, matching pkg/xyzshell/VERSION, for example 0.1.9
-        required: true
-        default: "0.1.9"
   push:
     tags:
       - "v*"
@@ -22,35 +17,33 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - name: Resolve release tag
-        id: meta
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_INPUT: ${{ inputs.release_tag || github.ref_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="$TAG_INPUT"
-          version="$(printf '%s' "$tag" | sed 's/^v//')"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~:-][A-Za-z0-9.+~:-]+)?$ ]]; then
-            echo "Expected a version like 0.1.0 or v0.1.0, got: $tag" >&2
-            exit 1
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Check out workflow source
         uses: actions/checkout@v5
-      - name: Validate workflow source version
+      - name: Read release version from source
+        id: meta
         env:
-          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
           source_version="$(tr -d '[:space:]' < pkg/xyzshell/VERSION)"
-          if [[ "$source_version" != "$RELEASE_VERSION" ]]; then
-            echo "Release tag version $RELEASE_VERSION does not match pkg/xyzshell/VERSION ($source_version)" >&2
+          if [[ ! "$source_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+~:-][A-Za-z0-9.+~:-]+)?$ ]]; then
+            echo "Invalid version in pkg/xyzshell/VERSION: $source_version" >&2
             exit 1
           fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$source_version"
+          else
+            tag="$REF_NAME"
+          fi
+          version="${tag#v}"
+          if [[ "$version" != "$source_version" ]]; then
+            echo "Release tag version $version does not match pkg/xyzshell/VERSION ($source_version)" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Create release if needed
         env:
           GH_TOKEN: ${{ github.token }}
